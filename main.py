@@ -1,3 +1,5 @@
+from base.utils import *
+
 
 def print_hi(name):
     print(f'Hi, {name}')
