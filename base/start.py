@@ -52,10 +52,12 @@ class Backend:
     def s3_files(self):
         return [o.key for o in self.space.objects.all()]
 
-    def s3_save(self, data: object, name: str):
+    def s3_save(self, data: object, idx: str):
+        if data is None:
+            return
         temp = temp_local()
-        key = full_key(name)
-        with open(temp, 'w') as f:
+        key = full_key(idx)
+        with open(temp, 'wb') as f:
             pickle.dump(data, f, -1)
         self.space.upload_file(temp, key)
         os.remove(temp)
@@ -74,35 +76,48 @@ class Backend:
     def active_users(self):
         return [v['name'] for v in self.users.find({'Jobs': {'$ne': []}}, {'name': 1, '_id': 0})]
 
+    def get_item(self, idx: str, kind: str):
+        try:
+            return self.users.find_one({f'{kind}.idx': idx}, {f'{kind}.$': 1})[kind][0]
+        except TypeError:
+            return None
+
     def replace_item(self, name: str, item: dict, kind: str):
         self.users.update_one({'name': name}, {'$pull': {kind: {'idx': item['idx']}}})
         self.users.update_one({'name': name}, {'$push': {kind: item}})
 
+    def get_game(self, idx: str):
+        return self.get_item(idx, 'Games')
+
+    def get_agent(self, idx: str):
+        return self.get_item(idx, 'Agents')
+
     def save_game(self, name: str, game: dict):
         self.replace_item(name, game, 'Games')
 
-    def save_agent(self, name: str, agent: dict, weights: object):
-        self.replace_item(name, agent, 'Agents')
-        self.s3_save(weights, agent['idx'])
+    def save_agent(self, idx: str, update: dict, weights: object):
+        for key in update:
+            self.users.update_one({'Agents.idx': idx}, {'$set': {f'Agents.$.{key}': update[key]}})
+        self.s3_save(weights, idx)
 
     def add_log(self, name: str, log: str):
         self.users.update_one({'name': name}, {'$push': {'logs': log}})
 
     def get_first_job(self, name: str):
-        cur = self.users.find_one({'name': name}, {'Jobs': 1, '_id': 0})
-        if cur and cur['Jobs']:
-            return cur['Jobs'][0]
-        return None
+        try:
+            return self.users.find_one({'name': name}, {'Jobs': 1})['Jobs'][0]
+        except Exception:
+            return None
 
     def check_job_status(self, idx: str):
         try:
-            return self.users.find_one({'Jobs.idx': idx}, {'Jobs.status': 1, '_id': 0})['Jobs'][0]['status']
+            return self.get_item(idx, 'Jobs')['status']
         except TypeError:
-            return 'kill'
+            return -1
 
-    def launch_job(self, name: str, idx: str, now: str):
-        self.users.update_one({'Jobs.idx': idx}, {'$set': {'Jobs.$.launch': now}})
-        self.add_log(name, f'{now}: {idx} launched')
+    def launch_job(self, name: str, idx: str, t: str):
+        self.users.update_one({'Jobs.idx': idx}, {'$set': {'Jobs.$.launch_time': t, 'Jobs.$.status': 2}})
+        self.add_log(name, f'{t}: {idx} launched')
 
     def delete_job(self, idx: str):
         self.users.update_one({}, {'$pull': {'Jobs': {'idx': idx}}})

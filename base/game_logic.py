@@ -14,6 +14,10 @@ def score_eval(row, score):
     return score
 
 
+def get_max_tile(row):
+    return int(1 << np.max(row))
+
+
 def create_table():
     table = {}
     for a in range(16):
@@ -32,9 +36,12 @@ def create_table():
                             score += 1 << (x + 1)
                             line_1[i], line_1[i + 1] = x + 1, 0
                     line_2 = [v for v in line_1 if v]
-                    line_2 = tuple(line_2 + [0] * (4 - len(line_2)))
-                    table[line] = (line_2, score, line != line_2)
+                    line_2 = line_2 + [0] * (4 - len(line_2))
+                    table[line] = (line_2, score, line != tuple(line_2))
     return table
+
+
+TABLE = create_table()
 
 #   member of the class is the state of the 4*4 board,
 #   score = current score in the game
@@ -45,28 +52,24 @@ def create_table():
 
 class Game:
 
-    actions = {0: 'left', 1: 'up', 2: 'right', 3: 'down'}
-    table = create_table()
+    debug_actions = {0: 'left', 1: 'up', 2: 'right', 3: 'down'}
 
-    def __init__(self, idx: str, row=None):
+    def __init__(self, idx=None, params=None):
         self.idx = idx
+        self.player = None
+        self.row = None
+        self.initial = None
         self.score = 0
         self.odo = 0
         self.moves = []
         self.tiles = []
-        if row is None:
-            self.row = np.zeros((4, 4), dtype=np.int8)
-            self.new_tile()
-            self.new_tile()
-            self.tiles = []
-        else:
-            self.row = row
-        self.initial = self.row.tolist()
+
+        self.generate(params)
 
     def __str__(self):
         return '\n'.join([''.join([str(1 << val if val else 0) + '\t' * (4 if (1 << val) < 1000 else 3)
                                    for val in j]) for j in self.row]) \
-               + f'\n score = {str(self.score)} moves = {str(self.odo)} reached {1 << np.max(self.row)}'
+               + f'\n score = {str(self.score)} moves = {str(self.odo)} reached {get_max_tile(self.row)}'
 
     @staticmethod
     def empty(row):
@@ -79,12 +82,34 @@ class Game:
         self.row[i[pos], j[pos]] = tile
         self.tiles.append([i[pos], j[pos], tile])
 
+    def generate(self, params: dict):
+        if params is None:
+            self.row = np.zeros((4, 4), dtype=np.int32)
+            self.new_tile()
+            self.new_tile()
+            self.tiles = []
+            self.initial = self.row.tolist()
+        else:
+            self.idx = params['idx']
+            self.player = params['player']
+            self.initial = params['initial']
+            self.row = np.array(params['current'], dtype=np.int32)
+            self.score = params['score']
+            self.odo = params['num_of_moves']
+            self.moves = params['moves']
+            self.tiles = params['tiles']
+
     def to_dict(self):
         return {
             'idx': self.idx,
+            'player': self.player,
             'initial': self.initial,
+            'current': self.row.tolist(),
+            'score': self.score,
+            'num_of_moves': self.odo,
+            'max_tile': get_max_tile(self.row),
             'moves': self.moves,
-            'tiles': [[int(w) for w in v] for v in self.tiles]
+            'tiles':  [[int(v[0]), int(v[1]), v[2]] for v in self.tiles]
         }
 
     @staticmethod
@@ -103,13 +128,14 @@ class Game:
     @staticmethod
     def _left(row, score):
         change = False
-        new_row = np.zeros((4, 4), dtype=np.int8)
+        new_row = row.copy()
         new_score = score
         for i in range(4):
-            new_row[i], score, change_line = Game.table[tuple(row[i])]
+            line, score, change_line = TABLE[tuple(row[i])]
             if change_line:
                 change = True
                 new_score += score
+                new_row[i] = line
         return new_row, new_score, change
 
     def pre_move(self, row, score, direction):
@@ -153,7 +179,7 @@ class Game:
                 return
             best_dir, best_row, best_score = self.find_best_move(estimator, depth, width, trigger)
             self._move_on(best_dir, best_row, best_score)
-            print(f'On {self.odo} we moved {Game.actions[best_dir]}')
+            print(f'On {self.odo} we moved {self.debug_actions[best_dir]}')
             print(self)
 
     def trial_run(self, estimator, depth=0, width=1, trigger=0):
@@ -191,9 +217,3 @@ class Game:
             average += max(best_value, 0)
         average = average / num_tiles
         return average
-
-
-# game = Game(idx='just_a_game')
-# game.trial_run_debug(estimator=score_eval)
-# x = game.to_dict()
-# BACK.save_game('Loki', x)

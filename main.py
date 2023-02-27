@@ -15,17 +15,16 @@ def worker(name):
                 BACK.delete_job(idx)
             now = time_now()
             BACK.launch_job(name, idx, now)
-            print(job['agent'])
             try:
-                agent = QAgent(name=name, idx, verbose=False)
+                agent = QAgent(job, debug=False)
                 if job['mode'] == 'train':
                     func = agent.train_run
                 else:
                     func = agent.test_run
-                status = func()
-                BACK.add_log(name, status)
+                status = func(job)
+                BACK.add_log(name, status + '\n')
             except Exception as ex:
-                BACK.add_log(name, f'{time_now()}: {idx} failed: {str(ex)}')
+                BACK.add_log(name, f'{time_now()}: Job {idx} failed: {str(ex)}\n')
             BACK.delete_job(idx)
         else:
             time.sleep(1)
@@ -43,10 +42,12 @@ def main():
         for name in close_workers:
             psutil.Process(WORKERS[name]).terminate()
             del WORKERS[name]
+            print(f'kill {name}')
         for name in open_workers:
             p = Process(target=worker, args=(name, ), daemon=True)
             p.start()
             WORKERS[name] = p.pid
+            print(f'start {name}')
         time.sleep(2)
 
 
