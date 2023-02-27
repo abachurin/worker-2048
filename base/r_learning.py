@@ -177,6 +177,7 @@ class QAgent:
         self.weights = []
         for weight_component in w:
             self.weights += weight_component.tolist()
+        del w
 
     def evaluate(self, row, score=None):
         return sum([self.weights[i][f] for i, f in enumerate(self.features(row))])
@@ -240,7 +241,7 @@ class QAgent:
         ma_collect = deque(maxlen=self.collect_step)
         reached = [0] * 7
         best_of_1000 = Game()
-        global_start = start = time.time()
+        global_start = start_1000 = time.time()
         self.print(f'Agent {self.idx} train session started, training episodes = {eps}')
         self.print('Agent will be saved every 1000 episodes and on STOP JOB command')
 
@@ -296,7 +297,7 @@ class QAgent:
                 average = int(np.mean(av1000))
                 len_1000 = len(av1000)
                 self.print(f'\n{time_now()}: episode = {self.train_eps}')
-                self.print(f'{round((time.time() - start) / 60, 2)} min for last {len_1000} episodes')
+                self.print(f'{round((time.time() - start_1000) / 60, 2)} min for last {len_1000} episodes')
                 self.print(f'average score = {average}')
                 for j in range(7):
                     r = sum(reached[j:]) / 10
@@ -310,7 +311,8 @@ class QAgent:
                 reached = [0] * 7
                 best_of_1000 = Game()
                 self.save_agent()
-                self.print(f'{time_now()}: Agent {self.idx} weights saved')
+                self.print(f'{time_now()}: Agent {self.idx} weights saved\n')
+                start_1000 = time.time()
 
         total_time = int(time.time() - global_start)
         self.print(f'\nTotal time = {total_time // 60} min {total_time % 60} sec')
