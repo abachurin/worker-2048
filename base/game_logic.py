@@ -54,8 +54,8 @@ class Game:
 
     debug_actions = {0: 'left', 1: 'up', 2: 'right', 3: 'down'}
 
-    def __init__(self, idx=None, params=None):
-        self.idx = idx
+    def __init__(self, params=None):
+        self.idx = None
         self.player = None
         self.row = None
         self.initial = None
@@ -63,13 +63,12 @@ class Game:
         self.odo = 0
         self.moves = []
         self.tiles = []
-
         self.generate(params)
 
     def __str__(self):
         return '\n'.join([''.join([str(1 << val if val else 0) + '\t' * (4 if (1 << val) < 1000 else 3)
                                    for val in j]) for j in self.row]) \
-               + f'\n score = {str(self.score)} moves = {str(self.odo)} reached {get_max_tile(self.row)}'
+               + f'\n score = {str(self.score)}, moves = {str(self.odo)}, reached {get_max_tile(self.row)}'
 
     @staticmethod
     def empty(row):
@@ -90,14 +89,18 @@ class Game:
             self.tiles = []
             self.initial = self.row.tolist()
         else:
-            self.idx = params['idx']
-            self.player = params['player']
-            self.initial = params['initial']
-            self.row = np.array(params['current'], dtype=np.int32)
+            self.idx = params.get('idx', None)
+            self.player = params.get('player', None)
+            self.initial = params.get('initial', None)
+            self.row = np.array(params['row'], dtype=np.int32)
             self.score = params['score']
-            self.odo = params['num_of_moves']
-            self.moves = params['moves']
-            self.tiles = params['tiles']
+            self.odo = params['odo']
+            self.moves = params.get('moves', [])
+            self.tiles = params.get('tiles', [])
+
+    @staticmethod
+    def tiles_to_int(tiles: list):
+        return [[int(v[0]), int(v[1]), v[2]] for v in tiles]
 
     def to_dict(self):
         return {
@@ -109,7 +112,7 @@ class Game:
             'num_of_moves': self.odo,
             'max_tile': get_max_tile(self.row),
             'moves': self.moves,
-            'tiles':  [[int(v[0]), int(v[1]), v[2]] for v in self.tiles]
+            'tiles':  self.tiles_to_int(self.tiles)
         }
 
     @staticmethod
@@ -145,49 +148,11 @@ class Game:
             new_row = np.rot90(new_row, 4 - direction)
         return new_row, new_score, change
 
-    def make_move(self, direction):
-        self.row, self.score, change = self.pre_move(self.row, self.score, direction)
-        self.odo += 1
-        self.moves.append(direction)
-        return change
-
-    def find_best_move(self, estimator, depth, width, trigger):
-        best_dir, best_value = 0, - np.inf
-        best_row, best_score = None, None
-        for direction in range(4):
-            new_row, new_score, change = self.pre_move(self.row, self.score, direction)
-            if change:
-                value = self.look_forward(estimator, new_row, new_score,
-                                          depth=depth, width=width, trigger=trigger)
-                if value > best_value:
-                    best_dir, best_value = direction, value
-                    best_row, best_score = new_row, new_score
-        return best_dir, best_row, best_score
-
     def _move_on(self, best_dir, best_row, best_score):
         self.moves.append(best_dir)
         self.odo += 1
         self.row, self.score = best_row, best_score
         self.new_tile()
-
-    # Run single episode (for debugging purposes)
-    def trial_run_debug(self, estimator, depth=0, width=1, trigger=0):
-        print('Starting position:')
-        print(self)
-        while True:
-            if self.game_over(self.row):
-                return
-            best_dir, best_row, best_score = self.find_best_move(estimator, depth, width, trigger)
-            self._move_on(best_dir, best_row, best_score)
-            print(f'On {self.odo} we moved {self.debug_actions[best_dir]}')
-            print(self)
-
-    def trial_run(self, estimator, depth=0, width=1, trigger=0):
-        while True:
-            if self.game_over(self.row):
-                return
-            best_dir, best_row, best_score = self.find_best_move(estimator, depth, width, trigger)
-            self._move_on(best_dir, best_row, best_score)
 
     # looking a few moves ahead and branching several new tile positions randomly
     def look_forward(self, estimator, row, score, depth, width, trigger):
@@ -217,3 +182,88 @@ class Game:
             average += max(best_value, 0)
         average = average / num_tiles
         return average
+
+    def find_best_move(self, estimator, depth, width, trigger):
+        best_dir, best_value = 0, - np.inf
+        best_row, best_score = None, None
+        for direction in range(4):
+            new_row, new_score, change = self.pre_move(self.row, self.score, direction)
+            if change:
+                value = self.look_forward(estimator, new_row, new_score,
+                                          depth=depth, width=width, trigger=trigger)
+                if value > best_value:
+                    best_dir, best_value = direction, value
+                    best_row, best_score = new_row, new_score
+        return best_dir, best_row, best_score
+
+    # Run single episode (for debugging purposes)
+    def trial_run_debug(self, estimator, depth=0, width=1, trigger=0):
+        print('Starting position:')
+        print(self)
+        while True:
+            if self.game_over(self.row):
+                return
+            best_dir, best_row, best_score = self.find_best_move(estimator, depth, width, trigger)
+            self._move_on(best_dir, best_row, best_score)
+            print(f'On {self.odo} we moved {self.debug_actions[best_dir]}')
+            print(self)
+
+    def trial_run(self, estimator, depth=0, width=1, trigger=0):
+        while True:
+            if self.game_over(self.row):
+                return
+            best_dir, best_row, best_score = self.find_best_move(estimator, depth, width, trigger)
+            self._move_on(best_dir, best_row, best_score)
+
+    def watch_run(self, job_idx, estimator, depth=0, width=1, trigger=0):
+        check = time.time() + 2
+        last_move = 0
+        BACK.update_watch_job(job_idx, [], [])
+        while True:
+            if self.game_over(self.row):
+                print(self)
+                self.moves.append(-1)
+                BACK.update_watch_job(job_idx,
+                                      moves=self.moves[last_move:], tiles=self.tiles_to_int(self.tiles[last_move:]))
+                return
+            best_dir, best_row, best_score = self.find_best_move(estimator, depth, width, trigger)
+            self._move_on(best_dir, best_row, best_score)
+            if time.time() > check:
+                if BACK.new_watch_job(job_idx):
+                    return
+                BACK.update_watch_job(job_idx,
+                                      moves=self.moves[last_move:], tiles=self.tiles_to_int(self.tiles[last_move:]))
+                last_move = self.odo
+                check = time.time() + 2
+
+
+def replay_debug(game_idx: str, end=1000000):
+    game_dict = BACK.get_item(game_idx, 'Games')
+    game_dict['row'] = game_dict['initial']
+    print(f"total moves = {game_dict['num_of_moves']}, score = {game_dict['score']}")
+    game_dict['score'] = 0
+    game_dict['odo'] = 0
+    game = Game(game_dict)
+    c, move = 0, 0
+    print(game)
+    while True:
+        move = game.moves[c]
+        if move == -1:
+            break
+        i, j, tile = game.tiles[c]
+        print(move, i, j, tile)
+        new_row, new_score, change = game.pre_move(game.row, game.score, move)
+        if not change:
+            print(f'NO MOVE! {c}, {move}')
+            break
+        game.row = new_row
+        if game.row[i, j]:
+            print(f'TILE SPACE OCCUPIED! {c}, {i}, {j}, {tile}')
+            break
+        game.row[i, j] = tile
+        game.score = new_score
+        game.odo += 1
+        print(game)
+        c += 1
+        if c == end:
+            break

@@ -9,6 +9,19 @@ import pickle
 import random
 import numpy as np
 from enum import Enum
+import shutil
+from pathlib import Path
+
+TMP_DIR = os.path.join(os.getcwd(), 'tmp', '')
+
+
+def clean_temp_dir():
+    if os.path.exists(TMP_DIR):
+        shutil.rmtree(TMP_DIR)
+    Path(TMP_DIR).mkdir(parents=True, exist_ok=True)
+
+
+clean_temp_dir()
 
 
 def full_key(name):
@@ -20,11 +33,20 @@ def time_suffix():
 
 
 def temp_local():
-    return f'tmp{time_suffix()}.pkl'
+    return os.path.join(TMP_DIR, f'tmp{time_suffix()}.pkl')
 
 
 def time_now():
     return str(datetime.now())[:19]
+
+
+def lapse_format(t):
+    diff = int(time.time() - t)
+    return f'{diff // 60} min {diff % 60} sec'
+
+
+def no_log_function(text):
+    return
 
 
 class Backend:
@@ -115,12 +137,39 @@ class Backend:
         except TypeError:
             return -1
 
+    def set_job_status(self, idx: str, new_status: int):
+        self.users.update_one({'Jobs.idx': idx}, {'$set': {'Jobs.$.status': new_status}})
+
     def launch_job(self, name: str, idx: str, t: str):
         self.users.update_one({'Jobs.idx': idx}, {'$set': {'Jobs.$.launch_time': t, 'Jobs.$.status': 2}})
         self.add_log(name, f'{t}: {idx} launched')
 
     def delete_job(self, idx: str):
-        self.users.update_one({}, {'$pull': {'Jobs': {'idx': idx}}})
+        self.users.update_one({'Jobs.idx': idx}, {'$pull': {'Jobs': {'idx': idx}}})
+
+    def delete_watch_user(self, idx: str):
+        self.users.delete_one({'Jobs.idx': idx})
+
+    # related to Watch Agent operations
+    def start_watch_job(self, idx):
+        self.users.update_one({'Jobs.idx': idx}, {'$set': {'Jobs.$.new_game': 0}})
+
+    def new_watch_job(self, idx):
+        try:
+            return self.users.find_one({'Jobs.idx': idx}, {'Jobs.$': 1})['Jobs'][0]['new_game']
+        except TypeError:
+            return -1
+
+    def update_watch_job(self, idx: str, moves: list, tiles: list):
+        self.users.update_one({'Jobs.idx': idx}, {
+            '$push': {
+                'Jobs.$.moves': {'$each': moves},
+                'Jobs.$.tiles': {'$each': tiles}},
+            '$set': {
+                'Jobs.$.new_game': 0}})
+
+    def clean_watch_jobs(self):
+        self.users.delete_many({'status': 'tmp'})
 
 
 with open('base/config.json', 'r') as f:

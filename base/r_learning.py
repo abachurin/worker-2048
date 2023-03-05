@@ -2,6 +2,8 @@ from .game_logic import *
 from collections import deque
 
 
+# Argument x for feature functions is a (4, 4) numpy array of np.int32
+
 # features = all adjacent pairs
 def f_2(x):
     x_vert = ((x[:3, :] << 4) + x[1:, :]).ravel()
@@ -73,6 +75,7 @@ PAR_SHAPE = {
     6: (33, 0)
 }
 CUTOFF_FOR_6_F = 14
+EXTRA_AGENTS = ['Random Moves', 'Best Score']
 
 # The RL agent. It is not actually Q, as it tries to learn values of the states (V), rather than actions (Q).
 # Not sure what is the correct terminology here, this is definitely a TD(0), basically a modified Q-learning.
@@ -90,47 +93,63 @@ CUTOFF_FOR_6_F = 14
 
 class QAgent:
 
-    def __init__(self, params: dict, debug=False):
+    def __init__(self, name: str, job_idx: str, idx: str, debug=False, no_logs=False):
 
         # basic params
-        self.name = params['name']
-        self.job_idx = params['idx']
-        self.idx = params['agent']
-        self.best_game_idx = f'best_of_{self.idx}'
-        self.best_trial_idx = f'last_trial_{self.idx}'
-        self.print = print if debug else self.silent_log
+        self.debug = debug
+        self.name = name
+        self.job_idx = job_idx
+        self.idx = idx
+        self.best_game_idx = f'best_of_{idx}'
+        self.best_trial_idx = f'last_trial_{idx}'
+
+        if no_logs:
+            self.print = no_log_function
+        elif debug:
+            self.print = print
+        else:
+            self.print = self.silent_log
+
         self.save_agent_keys = ('weight_signature', 'alpha', 'best_score', 'max_tile', 'train_eps',
                                 'train_history', 'collect_step')
         self.top_game = Game(params=BACK.get_game(self.best_game_idx))
 
-        # agent params from Database
-        agent = BACK.get_agent(self.idx)
-        self.n = agent['n']
-        self.weight_signature = agent['weight_signature']
-        self.alpha = agent['alpha']
-        self.decay = agent['decay']
-        self.step = agent['step']
-        self.min_alpha = agent['min_alpha']
-        self.best_score = agent['best_score']
-        self.max_tile = agent['max_tile']
-        self.train_eps = agent['train_eps']
-        self.train_history = agent['train_history']
-        self.collect_step = agent['collect_step']
+        match self.idx:
+            case 'Random Moves':
+                self.evaluate = random_eval
+            case 'Best Score':
+                self.evaluate = score_eval
+            case _:
+                # agent params from Database
+                agent = BACK.get_agent(self.idx)
+                self.n = agent['n']
+                self.weight_signature = agent['weight_signature']
+                self.alpha = agent['alpha']
+                self.decay = agent['decay']
+                self.step = agent['step']
+                self.min_alpha = agent['min_alpha']
+                self.best_score = agent['best_score']
+                self.max_tile = agent['max_tile']
+                self.train_eps = agent['train_eps']
+                self.train_history = agent['train_history']
+                self.collect_step = agent['collect_step']
 
-        # derived params
-        self.num_feat, self.size_feat = PAR_SHAPE[self.n]
-        self.features = FEATURE_FUNCTIONS[self.n]
+                # derived params
+                self.num_feat, self.size_feat = PAR_SHAPE[self.n]
+                self.features = FEATURE_FUNCTIONS[self.n]
 
-        # operational params
-        self.best_game = None
-        self.next_decay = self.train_eps + self.step
-        self.trigger_tile = 10
+                # operational params
+                self.best_game = None
+                self.next_decay = self.train_eps + self.step
+                self.trigger_tile = 10
 
-        self.weights = None
-        if self.weight_signature is None:
-            self.init_weights()
-        else:
-            self.load_weights()
+                self.weights = None
+                if self.weight_signature is None:
+                    self.init_weights()
+                else:
+                    self.load_weights()
+
+                self.evaluate = self._evaluate
 
     def __str__(self):
         return f'Agent {self.idx}, n={self.n}\ntrained for {self.train_eps} episodes, top score = {self.best_score}'
@@ -149,10 +168,20 @@ class QAgent:
             self.weights = (np.random.random((self.num_feat, self.size_feat)) / 100).tolist()
             self.weight_signature = [self.num_feat]
 
+    def load_weights(self):
+        self.print('loading weights ...')
+        w = BACK.s3_load(self.idx)
+        self.weights = []
+        for weight_component in w:
+            self.weights += weight_component.tolist()
+        del w
+
     def silent_log(self, log):
         BACK.add_log(self.name, log)
 
     def save_agent(self, with_weights=True):
+        if self.idx in EXTRA_AGENTS:
+            return
         if with_weights:
             start = 0
             nps = []
@@ -168,18 +197,13 @@ class QAgent:
         del nps
 
     def save_game(self, game: Game, idx: str):
+        if self.idx in EXTRA_AGENTS:
+            return
         game.idx = idx
         game.player = game.player or f'Agent {self.idx}'
         BACK.save_game(self.name, game.to_dict())
 
-    def load_weights(self):
-        w = BACK.s3_load(self.idx)
-        self.weights = []
-        for weight_component in w:
-            self.weights += weight_component.tolist()
-        del w
-
-    def evaluate(self, row, score=None):
+    def _evaluate(self, row, score=None):
         return sum([self.weights[i][f] for i, f in enumerate(self.features(row))])
 
     # The numpy library has very nice functions of transpose, rot90, ravel etc.
@@ -297,10 +321,10 @@ class QAgent:
                 average = int(np.mean(av1000))
                 len_1000 = len(av1000)
                 self.print(f'\n{time_now()}: episode = {self.train_eps}')
-                self.print(f'{round((time.time() - start_1000) / 60, 2)} min for last {len_1000} episodes')
+                self.print(f'{lapse_format(start_1000)} for last {len_1000} episodes')
                 self.print(f'average score = {average}')
                 for j in range(7):
-                    r = sum(reached[j:]) / 10
+                    r = sum(reached[j:]) / len_1000 * 100
                     if r:
                         self.print(f'{1 << (j + 10)} reached in {r} %')
                 self.print(f'best game of last 1000:')
@@ -314,8 +338,7 @@ class QAgent:
                 self.print(f'{time_now()}: Agent {self.idx} weights saved\n')
                 start_1000 = time.time()
 
-        total_time = int(time.time() - global_start)
-        self.print(f'\nTotal time = {total_time // 60} min {total_time % 60} sec')
+        self.print(f'\nTotal time = {lapse_format(global_start)}')
         self.save_agent()
         return f'{time_now()}: Agent {self.idx} saved, {self.train_eps} training episodes\n------------------------'
 
@@ -331,13 +354,14 @@ class QAgent:
         results = []
         for i in range(eps):
             # check job status
-            status = BACK.check_job_status(self.job_idx)
-            if status == -1:
-                return f'{time_now()}: Job killed by {self.name}'
-            if status == 0:
-                self.save_agent()
-                self.print(f'Job stopped by {self.name}')
-                break
+            if not self.debug:
+                status = BACK.check_job_status(self.job_idx)
+                if status == -1:
+                    return f'{time_now()}: Job killed by {self.name}'
+                if status == 0:
+                    self.save_agent()
+                    self.print(f'Job stopped by {self.name}')
+                    break
 
             now = time.time()
             game = Game()
@@ -354,7 +378,7 @@ class QAgent:
         results.sort(key=lambda v: v.score, reverse=True)
 
         def share(limit):
-            return len([0 for v in figures if v >= limit]) / len(figures) * 100
+            return int(len([0 for v in figures if v >= limit]) / len(figures) * 10000) / 100
 
         self.print('\nBest games:\n')
         for v in results[:3]:
