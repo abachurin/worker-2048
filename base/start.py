@@ -65,8 +65,7 @@ class Backend:
         self.space_name = s3_creds['space']
         self.space = self.engine.Bucket(self.space_name)
         # MongoDB
-        cluster = f'mongodb+srv://{mongo_creds["user"]}:{mongo_creds["pwd"]}@instance-0' \
-                  f'.55byx.mongodb.net/?retryWrites=true&w=majority'
+        cluster = f'mongodb+srv://{mongo_creds["user"]}:{mongo_creds["pwd"]}@{mongo_creds["location"]}'
         client = MongoClient(cluster)
         db = client[mongo_creds['db']]
         self.users = db['users']
@@ -174,7 +173,7 @@ class Backend:
 
 with open('base/config.json', 'r') as f:
     CONF = json.load(f)
-LOCAL = os.environ.get('S3_URL', 'local') == 'local'
+LOCAL = os.environ.get('AT_HOME', 'local') == 'local'
 
 if LOCAL:
     with open(CONF['s3_credentials'], 'r') as f:
@@ -191,6 +190,7 @@ else:
     mongo_credentials = {
         'user': os.getenv('MG_USER', None),
         'pwd': os.getenv('MG_PWD', None),
+        'location': os.getenv('MG_LOCATION', None),
         'db': os.getenv('MG_DB', 'robot-2048'),
     }
 
