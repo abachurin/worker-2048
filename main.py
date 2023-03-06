@@ -10,7 +10,7 @@ def log_memory_usage():
     memo = psutil.virtual_memory()
     mb = 1 << 20
     BACK.add_log('Loki', f'{str(datetime.now())[11:]} | total: {int(memo.total / mb)} '
-                         f'| used: {int(memo.used / mb)} | available: {int(memo.available / mb)}\n')
+                         f'| used: {int(memo.used / mb)} | available: {int(memo.available / mb)}')
 
 
 def worker(name):
@@ -63,7 +63,7 @@ def main():
             clean_temp_dir()
         time.sleep(3)
         mem += 1
-        if mem % 10 == 0:
+        if mem % 100 == 0:
             log_memory_usage()
 
 
