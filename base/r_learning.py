@@ -256,7 +256,7 @@ class QAgent:
     def decay_alpha(self):
         self.alpha = round(max(self.alpha * self.decay, self.min_alpha), 4)
         self.next_decay = self.train_eps + self.step
-        self.print(f'At episode = {self.train_eps + 1} current learning rate = {round(self.alpha, 4)}')
+        self.print(f'At episode {self.train_eps + 1} learning rate decayed to = {round(self.alpha, 4)}')
 
     def train_run(self, params: dict):
         eps = params['episodes']
@@ -267,7 +267,7 @@ class QAgent:
         best_of_1000 = Game()
         global_start = start_1000 = time.time()
         self.print(f'Agent {self.idx} train session started, training episodes = {eps}')
-        self.print('Agent will be saved every 10000 episodes, in the end, and on STOP JOB command')
+        self.print('Agent will be saved every 1000 episodes, in the end, and on STOP JOB command')
 
         while self.train_eps < last_episode:
             # check job status
@@ -335,9 +335,9 @@ class QAgent:
                 reached = [0] * 7
                 best_of_1000 = Game()
                 start_1000 = time.time()
-            if self.train_eps % 10000 == 0:
                 self.save_agent()
                 self.print(f'{time_now()}: Agent {self.idx} weights saved')
+
         self.print(f'Total time = {lapse_format(global_start)}')
         self.save_agent()
         return f'{time_now()}: Agent {self.idx} saved, {self.train_eps} training episodes\n------------------------'
