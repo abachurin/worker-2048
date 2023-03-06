@@ -276,7 +276,7 @@ class QAgent:
                 return f'{time_now()}: Job killed by {self.name}\n--------------'
             if status == 0:
                 self.save_agent()
-                self.print(f'Job stopped by {self.name}')
+                self.print(f'{time_now()}Job stopped by {self.name}. Saving weights ...')
                 break
 
             # check if it's time to decay learning rate
@@ -337,8 +337,8 @@ class QAgent:
                 start_1000 = time.time()
             if self.train_eps % 10000 == 0:
                 self.save_agent()
-                self.print(f'{time_now()}: Agent {self.idx} weights saved\n')
-        self.print(f'\nTotal time = {lapse_format(global_start)}')
+                self.print(f'{time_now()}: Agent {self.idx} weights saved')
+        self.print(f'Total time = {lapse_format(global_start)}')
         self.save_agent()
         return f'{time_now()}: Agent {self.idx} saved, {self.train_eps} training episodes\n------------------------'
 
