@@ -29,7 +29,6 @@ def worker(name):
                 if status:
                     BACK.add_log(name, status + '\n')
             except Exception as ex:
-                print(ex)
                 BACK.add_log(name, f'{time_now()}: Job {idx} failed: {str(ex)}\n')
             BACK.delete_job(idx)
         else:

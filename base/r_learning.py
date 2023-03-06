@@ -113,6 +113,7 @@ class QAgent:
         self.save_agent_keys = ('weight_signature', 'alpha', 'best_score', 'max_tile', 'train_eps',
                                 'train_history', 'collect_step')
         self.top_game = Game(params=BACK.get_game(self.best_game_idx))
+        self.best_score = self.top_game.score
 
         match self.idx:
             case 'Random Moves':
@@ -128,7 +129,6 @@ class QAgent:
                 self.decay = agent['decay']
                 self.step = agent['step']
                 self.min_alpha = agent['min_alpha']
-                self.best_score = agent['best_score']
                 self.max_tile = agent['max_tile']
                 self.train_eps = agent['train_eps']
                 self.train_history = agent['train_history']
@@ -243,7 +243,7 @@ class QAgent:
                 dw = (best_score - game.score + best_value - old_label) * self.alpha / self.num_feat
                 self.update(state, dw)
             game.row, game.score = best_row, best_score
-            game.odo += 1
+            game.n_moves += 1
             game.moves.append(action)
             state, old_label = game.row.copy(), best_value
             game.new_tile()
@@ -324,7 +324,7 @@ class QAgent:
                 self.print(f'{lapse_format(start_1000)} for last {len_1000} episodes')
                 self.print(f'average score = {average}')
                 for j in range(7):
-                    r = sum(reached[j:]) / len_1000 * 100
+                    r = int(sum(reached[j:]) / len_1000 * 10000) / 100
                     if r:
                         self.print(f'{1 << (j + 10)} reached in {r} %')
                 self.print(f'best game of last 1000:')
@@ -366,7 +366,7 @@ class QAgent:
             now = time.time()
             game = Game()
             game.trial_run(estimator=self.evaluate, depth=depth, width=width, trigger=trigger)
-            self.print(f'game {i}, result {game.score}, moves {game.odo}, achieved {get_max_tile(game.row)}, '
+            self.print(f'game {i}, result {game.score}, moves {game.n_moves}, achieved {get_max_tile(game.row)}, '
                        f'time = {(time.time() - now):.2f}')
             results.append(game)
 
@@ -374,7 +374,7 @@ class QAgent:
             return f'No results collected\n--------------'
         average = np.average([v.score for v in results])
         figures = [get_max_tile(v.row) for v in results]
-        total_odo = sum([v.odo for v in results])
+        total_odo = sum([v.n_moves for v in results])
         results.sort(key=lambda v: v.score, reverse=True)
 
         def share(limit):

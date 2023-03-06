@@ -60,7 +60,7 @@ class Game:
         self.row = None
         self.initial = None
         self.score = 0
-        self.odo = 0
+        self.n_moves = 0
         self.moves = []
         self.tiles = []
         self.generate(params)
@@ -68,7 +68,7 @@ class Game:
     def __str__(self):
         return '\n'.join([''.join([str(1 << val if val else 0) + '\t' * (4 if (1 << val) < 1000 else 3)
                                    for val in j]) for j in self.row]) \
-               + f'\n score = {str(self.score)}, moves = {str(self.odo)}, reached {get_max_tile(self.row)}'
+               + f'\n score = {str(self.score)}, moves = {str(self.n_moves)}, reached {get_max_tile(self.row)}'
 
     @staticmethod
     def empty(row):
@@ -94,7 +94,7 @@ class Game:
             self.initial = params.get('initial', None)
             self.row = np.array(params['row'], dtype=np.int32)
             self.score = params['score']
-            self.odo = params['odo']
+            self.n_moves = params['n_moves']
             self.moves = params.get('moves', [])
             self.tiles = params.get('tiles', [])
 
@@ -107,9 +107,9 @@ class Game:
             'idx': self.idx,
             'player': self.player,
             'initial': self.initial,
-            'current': self.row.tolist(),
+            'row': self.row.tolist(),
             'score': self.score,
-            'num_of_moves': self.odo,
+            'n_moves': self.n_moves,
             'max_tile': get_max_tile(self.row),
             'moves': self.moves,
             'tiles':  self.tiles_to_int(self.tiles)
@@ -150,7 +150,7 @@ class Game:
 
     def _move_on(self, best_dir, best_row, best_score):
         self.moves.append(best_dir)
-        self.odo += 1
+        self.n_moves += 1
         self.row, self.score = best_row, best_score
         self.new_tile()
 
@@ -205,7 +205,7 @@ class Game:
                 return
             best_dir, best_row, best_score = self.find_best_move(estimator, depth, width, trigger)
             self._move_on(best_dir, best_row, best_score)
-            print(f'On {self.odo} we moved {self.debug_actions[best_dir]}')
+            print(f'On {self.n_moves} we moved {self.debug_actions[best_dir]}')
             print(self)
 
     def trial_run(self, estimator, depth=0, width=1, trigger=0):
@@ -221,7 +221,6 @@ class Game:
         BACK.update_watch_job(job_idx, [], [])
         while True:
             if self.game_over(self.row):
-                print(self)
                 self.moves.append(-1)
                 BACK.update_watch_job(job_idx,
                                       moves=self.moves[last_move:], tiles=self.tiles_to_int(self.tiles[last_move:]))
@@ -233,7 +232,7 @@ class Game:
                     return
                 BACK.update_watch_job(job_idx,
                                       moves=self.moves[last_move:], tiles=self.tiles_to_int(self.tiles[last_move:]))
-                last_move = self.odo
+                last_move = self.n_moves
                 check = time.time() + 2
 
 
@@ -242,7 +241,7 @@ def replay_debug(game_idx: str, end=1000000):
     game_dict['row'] = game_dict['initial']
     print(f"total moves = {game_dict['num_of_moves']}, score = {game_dict['score']}")
     game_dict['score'] = 0
-    game_dict['odo'] = 0
+    game_dict['n_moves'] = 0
     game = Game(game_dict)
     c, move = 0, 0
     print(game)
@@ -262,7 +261,7 @@ def replay_debug(game_idx: str, end=1000000):
             break
         game.row[i, j] = tile
         game.score = new_score
-        game.odo += 1
+        game.n_moves += 1
         print(game)
         c += 1
         if c == end:

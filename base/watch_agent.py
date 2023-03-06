@@ -49,7 +49,7 @@ def watch_run(job: dict):
             params = {
                 'row': job['row'],
                 'score': job['score'],
-                'odo': job['odo']
+                'n_moves': job['n_moves']
             }
             game = Game(params=params)
             game.watch_run(idx, estimator, depth=job['depth'], width=job['width'], trigger=job['trigger'])
