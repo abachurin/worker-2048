@@ -6,6 +6,13 @@ WORKERS = {
 }
 
 
+def log_memory_usage():
+    memo = psutil.virtual_memory()
+    mb = 1 << 20
+    BACK.add_log('Loki', f'{str(datetime.now())[11:]} | total: {int(memo.total / mb)} '
+                         f'| used: {int(memo.used / mb)} | available: {int(memo.available / mb)}\n')
+
+
 def worker(name):
     while True:
         job = BACK.get_first_job(name)
@@ -37,6 +44,7 @@ def worker(name):
 
 def main():
     BACK.clean_watch_jobs()
+    mem = 0
     while True:
         active = BACK.active_users()
         close_workers = [v for v in WORKERS if v not in active]
@@ -54,6 +62,9 @@ def main():
         if not active:
             clean_temp_dir()
         time.sleep(3)
+        mem += 1
+        if mem % 10 == 0:
+            log_memory_usage()
 
 
 if __name__ == '__main__':
