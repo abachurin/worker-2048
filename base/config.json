@@ -1,4 +1,4 @@
 {
     "s3_credentials": "/Users/abachurin/aws/do_credentials.json",
-    "mongo_credentials": "/Users/abachurin/aws/do_mongo.json"
+    "mongo_credentials": "/Users/abachurin/aws/mongo_credentials.json"
 }

@@ -6,19 +6,19 @@ from base.start import *
 # the table has the same 2**16 = 65536 entries. We need 4 such tables. Not much memory for a nice speedup.
 
 
-def random_eval(row, score):
+def random_eval(_, score: int) -> float:
     return np.random.random()
 
 
-def score_eval(row, score):
+def score_eval(_, score: int) -> float:
     return score
 
 
-def get_max_tile(row):
+def get_max_tile(row: np.ndarray) -> int:
     return int(1 << np.max(row))
 
 
-def create_table():
+def create_table() -> Mapping[Tuple[int, int, int, int], Tuple[Tuple[int, int, int, int], int, bool]]:
     table = {}
     for a in range(16):
         for b in range(16):
@@ -55,23 +55,24 @@ class Game:
     debug_actions = {0: 'left', 1: 'up', 2: 'right', 3: 'down'}
 
     def __init__(self, params=None):
-        self.idx = None
-        self.player = None
-        self.row = None
-        self.initial = None
+        self.name: Union[str, None] = None
+        self.user = None
+        self.row: Union[np.ndarray, None] = None
+        self.initial: Union[np.ndarray, None] = None
         self.score = 0
-        self.n_moves = 0
-        self.moves = []
-        self.tiles = []
+        self.numMoves = 0
+        self.moves: List[int] = []
+        self.tiles: List[List[int]] = []
+
         self.generate(params)
 
     def __str__(self):
-        return '\n'.join([''.join([str(1 << val if val else 0) + '\t' * (4 if (1 << val) < 1000 else 3)
+        return '\n'.join([''.join([str(1 << val if val else 0) + ' ' * (10 - len(str(1 << val)))
                                    for val in j]) for j in self.row]) \
-               + f'\n score = {str(self.score)}, moves = {str(self.n_moves)}, reached {get_max_tile(self.row)}'
+               + f'\n score = {str(self.score)}, moves = {str(self.numMoves)}, reached {get_max_tile(self.row)}\n'
 
     @staticmethod
-    def empty(row):
+    def empty(row: np.ndarray) -> np.ndarray:
         return np.where(row == 0)
 
     def new_tile(self):
@@ -89,47 +90,47 @@ class Game:
             self.tiles = []
             self.initial = self.row.tolist()
         else:
-            self.idx = params.get('idx', None)
-            self.player = params.get('player', None)
-            self.initial = params.get('initial', None)
-            self.row = np.array(params['row'], dtype=np.int32)
+            self.name = params.get('name', None)
+            self.user = params.get('user', None)
+            self.initial = params['initial']
+            self.row = np.array(self.initial, dtype=np.int32)
             self.score = params['score']
-            self.n_moves = params['n_moves']
+            self.numMoves = params['numMoves']
             self.moves = params.get('moves', [])
             self.tiles = params.get('tiles', [])
 
     @staticmethod
-    def tiles_to_int(tiles: list):
+    def tiles_to_int(tiles: List[List[int]]) -> List[List[int]]:
         return [[int(v[0]), int(v[1]), v[2]] for v in tiles]
 
-    def to_dict(self):
+    def to_mongo(self) -> dict:
         return {
-            'idx': self.idx,
-            'player': self.player,
+            'name': self.name,
+            'user': self.user,
             'initial': self.initial,
             'row': self.row.tolist(),
             'score': self.score,
-            'n_moves': self.n_moves,
-            'max_tile': get_max_tile(self.row),
+            'numMoves': self.numMoves,
+            'maxTile': get_max_tile(self.row),
             'moves': self.moves,
             'tiles':  self.tiles_to_int(self.tiles)
         }
 
     @staticmethod
-    def empty_count(row):
+    def empty_count(row) -> int:
         return 16 - np.count_nonzero(row)
 
     @staticmethod
-    def adjacent_pair_count(row):
+    def adjacent_pair_count(row) -> int:
         return 24 - np.count_nonzero(row[:, :3] - row[:, 1:]) - np.count_nonzero(row[:3, :] - row[1:, :])
 
-    def game_over(self, row):
+    def game_over(self, row) -> bool:
         if self.empty_count(self.row):
             return False
         return not self.adjacent_pair_count(row)
 
     @staticmethod
-    def _left(row, score):
+    def _left(row, score) -> Tuple[np.ndarray, int, bool]:
         change = False
         new_row = row.copy()
         new_score = score
@@ -141,7 +142,7 @@ class Game:
                 new_row[i] = line
         return new_row, new_score, change
 
-    def pre_move(self, row, score, direction):
+    def pre_move(self, row, score, direction) -> Tuple[np.ndarray, int, bool]:
         new_row = np.rot90(row, direction) if direction else row
         new_row, new_score, change = self._left(new_row, score)
         if direction:
@@ -150,12 +151,13 @@ class Game:
 
     def _move_on(self, best_dir, best_row, best_score):
         self.moves.append(best_dir)
-        self.n_moves += 1
+        self.numMoves += 1
         self.row, self.score = best_row, best_score
         self.new_tile()
 
     # looking a few moves ahead and branching several new tile positions randomly
-    def look_forward(self, estimator, row, score, depth, width, trigger):
+    def look_forward(self, estimator: Callable[[np.ndarray, int], float],
+                     row: np.ndarray, score: int, depth: int, width: int, trigger: int) -> float:
         if depth == 0:
             return estimator(row, score)
         empty = self.empty_count(row)
@@ -183,7 +185,8 @@ class Game:
         average = average / num_tiles
         return average
 
-    def find_best_move(self, estimator, depth, width, trigger):
+    def find_best_move(self, estimator: Callable[[np.ndarray, int], float],
+                       depth: int, width: int, trigger: int) -> Tuple[int, np.ndarray, int]:
         best_dir, best_value = 0, - np.inf
         best_row, best_score = None, None
         for direction in range(4):
@@ -197,7 +200,7 @@ class Game:
         return best_dir, best_row, best_score
 
     # Run single episode (for debugging purposes)
-    def trial_run_debug(self, estimator, depth=0, width=1, trigger=0):
+    def trial_run_debug(self, estimator: Callable[[np.ndarray, int], float], depth: int, width: int, trigger: int):
         print('Starting position:')
         print(self)
         while True:
@@ -205,43 +208,23 @@ class Game:
                 return
             best_dir, best_row, best_score = self.find_best_move(estimator, depth, width, trigger)
             self._move_on(best_dir, best_row, best_score)
-            print(f'On {self.n_moves} we moved {self.debug_actions[best_dir]}')
+            print(f'On {self.numMoves} we moved {self.debug_actions[best_dir]}')
             print(self)
 
-    def trial_run(self, estimator, depth=0, width=1, trigger=0):
+    def trial_run(self, estimator: Callable[[np.ndarray, int], float], depth: int, width: int, trigger: int):
         while True:
             if self.game_over(self.row):
                 return
             best_dir, best_row, best_score = self.find_best_move(estimator, depth, width, trigger)
             self._move_on(best_dir, best_row, best_score)
 
-    def watch_run(self, job_idx, estimator, depth=0, width=1, trigger=0):
-        check = time.time() + 2
-        last_move = 0
-        BACK.update_watch_job(job_idx, [], [])
-        while True:
-            if self.game_over(self.row):
-                self.moves.append(-1)
-                BACK.update_watch_job(job_idx,
-                                      moves=self.moves[last_move:], tiles=self.tiles_to_int(self.tiles[last_move:]))
-                return
-            best_dir, best_row, best_score = self.find_best_move(estimator, depth, width, trigger)
-            self._move_on(best_dir, best_row, best_score)
-            if time.time() > check:
-                if BACK.new_watch_job(job_idx):
-                    return
-                BACK.update_watch_job(job_idx,
-                                      moves=self.moves[last_move:], tiles=self.tiles_to_int(self.tiles[last_move:]))
-                last_move = self.n_moves
-                check = time.time() + 2
 
-
-def replay_debug(game_idx: str, end=1000000):
-    game_dict = BACK.get_item(game_idx, 'Games')
+def replay_debug(game_name: str, end=1000000):
+    game_dict = BACK.get_game(game_name)
     game_dict['row'] = game_dict['initial']
     print(f"total moves = {game_dict['num_of_moves']}, score = {game_dict['score']}")
     game_dict['score'] = 0
-    game_dict['n_moves'] = 0
+    game_dict['numMoves'] = 0
     game = Game(game_dict)
     c, move = 0, 0
     print(game)
@@ -261,7 +244,7 @@ def replay_debug(game_idx: str, end=1000000):
             break
         game.row[i, j] = tile
         game.score = new_score
-        game.n_moves += 1
+        game.numMoves += 1
         print(game)
         c += 1
         if c == end:
