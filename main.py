@@ -60,6 +60,7 @@ def main():
                 clean_temp_dir()
             if save_memory_counter % 3600 == 0:
                 log_memory_usage()
+                BACK.clean_watch_jobs()
         except Exception as ex:
             print(f'{time_now()}: {str(ex)}')
         finally:

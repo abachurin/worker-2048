@@ -140,9 +140,6 @@ class Backend:
         for name in STOPPER:
             if name not in all_games:
                 del STOPPER[name]
-        for name in FINISH:
-            if name not in all_games:
-                del STOPPER[name]
 
     def active_jobs(self) -> Tuple[List[str], List[str]]:
         jobs = [v for v in self.jobs.find({}, {'description': 1, 'status': 1})]
