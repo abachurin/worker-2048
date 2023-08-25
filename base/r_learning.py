@@ -134,7 +134,6 @@ class QAgent:
                 self.num_feat, self.size_feat = PAR_SHAPE[self.n]
                 self.features = FEATURE_FUNCTIONS[self.n]
                 self.next_decay = self.lastTrainingEpisode + self.step
-                self.trigger_tile = 10
 
                 self.weights = None
                 if not self.weightSignature:
@@ -292,11 +291,7 @@ class QAgent:
 
             if max_tile >= 10:
                 reached[max_tile - 10] += 1
-
-            if max_tile > self.maxTile:
-                self.maxTile = max_tile
-                if self.maxTile > self.trigger_tile:
-                    self.decay_alpha(job_name)
+            self.maxTile = max(self.maxTile, max_tile)
 
             if self.lastTrainingEpisode % 10 == 0 and self.lastTrainingEpisode > 100:
                 elapsed_time = time_now() - global_start
