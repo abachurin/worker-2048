@@ -101,3 +101,4 @@ def watch_run(job: dict):
         time.sleep(2)
     BACK.games.delete_many({'user': user})
     return
+
