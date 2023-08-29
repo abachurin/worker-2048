@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import os
 import json
 import time
+from collections import deque
 import re
 from pprint import pprint
 import boto3
@@ -14,6 +15,8 @@ import shutil
 from pathlib import Path
 from typing import List, Union, Mapping, Any, Tuple, Callable, Dict
 from threading import Thread
+from multiprocessing import Process
+import psutil
 
 
 class JobType(Enum):
@@ -82,6 +85,7 @@ def no_log_function(_):
 class Backend:
 
     watch_game_pattern = {"$regex": r'^\*'}
+    admin_logs_limit = 200
 
     def __init__(self, s3_creds: dict, mongo_creds: dict):
         # S3 Storage
@@ -99,12 +103,56 @@ class Backend:
         # MongoDB
         cluster = f'mongodb+srv://{mongo_creds["user"]}:{mongo_creds["pwd"]}@{mongo_creds["location"]}'
         client = MongoClient(cluster)
-        db = client[mongo_creds['db']]
-        self.users = db['users']
-        self.agents = db['agents']
-        self.games = db['games']
-        self.jobs = db['jobs']
+        self.db = client[mongo_creds['db']]
+        self.users = self.db['users']
+        self.agents = self.db['agents']
+        self.games = self.db['games']
+        self.jobs = self.db['jobs']
+        self.workers = {}
 
+    # Memory management
+    @staticmethod
+    def memory_used() -> int:
+        return psutil.virtual_memory().used >> 20
+
+    @staticmethod
+    def memory_free() -> int:
+        return psutil.virtual_memory().available >> 20
+
+    def s3_used_space(self) -> int:
+        return sum([o.size for o in self.space.objects.all()]) >> 20
+
+    def mongo_used_space(self) -> int:
+        return int(self.db.command('dbstats')['totalSize']) >> 20
+
+    def update_admin(self, fields: dict):
+        self.users.update_one({'name': 'admin'}, {'$set': fields})
+
+    def admin_logs(self, log:  str):
+        admin = self.users.find_one({'name': 'admin'}, {'logs': 1})
+        if admin is not None:
+            logs = admin['logs'] + log.split('\n')
+            if len(logs) > self.admin_logs_limit + 50:
+                logs = logs[-self.admin_logs_limit:]
+            self.update_admin({'logs': logs})
+
+    def admin_update(self):
+        memo_used = self.memory_used()
+        memo_free = self.memory_free()
+        s3_used = self.s3_used_space()
+        mongo_used = self.mongo_used_space()
+        self.update_admin({'memoUsed': memo_used, 'memoFree': memo_free, 's3Used': s3_used, 'mongoUsed': mongo_used})
+
+    def admin_adjust_memo(self, job_name: str):
+        admin = self.users.find_one({'name': 'admin'}, {'memoProjected': 1})
+        job = self.jobs.find_one({'description': job_name}, {'memoProjected': 1})
+        if admin and job:
+            self.jobs.update_one({'description': job_name}, {'$set': {'memoProjected': 0}})
+            self.users.update_one({'name': 'admin'},
+                                  {'$set': {'memoProjected': admin['memoProjected'] - job['memoProjected']}})
+            self.admin_update()
+
+    # S3 Storage
     def s3_files(self) -> List[str]:
         return [o.key for o in self.space.objects.all()]
 
@@ -129,18 +177,9 @@ class Backend:
         os.remove(temp)
         return result
 
-    def clean_watch_jobs(self):
-        self.jobs.delete_many({'type': JobType.WATCH.value})
-        self.games.delete_many({'name': self.watch_game_pattern})
+    # MongoDB
 
-    def clean_watch_games(self):
-        watch_users = [v['user'] for v in self.jobs.find({'type': JobType.WATCH.value})]
-        self.games.delete_many({'user': {"$nin": watch_users}})
-        all_games = [v['name'] for v in self.games.find()]
-        for name in STOPPER:
-            if name not in all_games:
-                del STOPPER[name]
-
+    # General Job management
     def active_jobs(self) -> Tuple[List[str], List[str]]:
         jobs = [v for v in self.jobs.find({}, {'description': 1, 'status': 1})]
         active = [v['description'] for v in jobs]
@@ -158,7 +197,13 @@ class Backend:
         return job
 
     def delete_job(self, job_name: str):
-        self.jobs.delete_one({'description': job_name})
+        job = self.jobs.find_one({'description': job_name}, {'memoProjected': 1})
+        if job:
+            admin = self.users.find_one({'name': 'admin'}, {'memoProjected': 1})
+            if admin:
+                self.users.update_one({'name': 'admin'},
+                                      {'$set': {'memoProjected': admin['memoProjected'] - job['memoProjected']}})
+            self.jobs.delete_one({'description': job_name})
 
     def check_job_status(self, job_name: str) -> JobStatus:
         job = self.jobs.find_one({'description': job_name})
@@ -166,6 +211,11 @@ class Backend:
             return JobStatus.KILL
         return JobStatus(job['status'])
 
+    def add_log(self, name: str, log: str):
+        lines = log.split('\n')
+        self.users.update_one({'name': name}, {'$push': {'logs': {'$each': lines}}})
+
+    # Train/Test Agent
     def update_timing(self, job_name: str, elapsed_time: int, remaining_time: str):
         self.jobs.update_one({'description': job_name},
                              {'$set': {'timeElapsed': elapsed_time, 'remainingTimeEstimate': remaining_time}})
@@ -173,16 +223,25 @@ class Backend:
     def save_new_alpha(self, job_name: str, alpha: float):
         self.jobs.update_one({'description': job_name}, {'$set': {'alpha': alpha}})
 
-    def add_log(self, name: str, log: str):
-        lines = log.split('\n')
-        self.users.update_one({'name': name}, {'$push': {'logs': {'$each': lines}}})
-
     def get_agent(self, agent_name: str) -> Union[None, Mapping[str, Any]]:
         return self.agents.find_one({'name': agent_name})
 
     def save_agent(self, name: str, update: dict, weights: object):
         self.agents.update_one({'name': name}, {'$set': update})
         self.s3_save(weights, name)
+
+    # Watch Agent
+    def clean_watch_jobs(self):
+        self.jobs.delete_many({'type': JobType.WATCH.value})
+        self.games.delete_many({'name': self.watch_game_pattern})
+
+    def clean_watch_games(self):
+        watch_users = [v['user'] for v in self.jobs.find({'type': JobType.WATCH.value})]
+        self.games.delete_many({'user': {"$nin": watch_users}})
+        all_games = [v['name'] for v in self.games.find()]
+        for name in STOPPER:
+            if name not in all_games:
+                del STOPPER[name]
 
     def get_game_params(self, game_name: str) -> Union[None, Mapping[str, Any]]:
         return self.games.find_one({'name': game_name})

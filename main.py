@@ -1,15 +1,6 @@
 from base.watch_agent import *
-import psutil
-from multiprocessing import Process
 
-WORKERS = {}
-
-
-def log_memory_usage():
-    memo = psutil.virtual_memory()
-    mb = 1 << 20
-    BACK.add_log('Loki', f'{str(datetime.now())[:19]} | total: {int(memo.total / mb)} '
-                         f'| used: {int(memo.used / mb)} | available: {int(memo.available / mb)}')
+JOBS = {}
 
 
 def worker(job: dict):
@@ -35,18 +26,25 @@ def worker(job: dict):
 def main():
     clean_temp_dir()
     BACK.clean_watch_jobs()
+    BACK.update_admin({'memoProjected': 0})
     save_memory_counter = 0
     while True:
+        time.sleep(1000)
+        continue
         try:
             active, pending = BACK.active_jobs()
-            close_workers = [v for v in WORKERS if v not in active]
-            open_workers = [v for v in pending if v not in WORKERS]
+            close_workers = [v for v in JOBS if v not in active]
+            open_workers = [v for v in pending if v not in JOBS]
+            delete = False
             for job_name in close_workers:
-                psutil.Process(WORKERS[job_name]).terminate()
+                delete = True
+                psutil.Process(JOBS[job_name]).terminate()
                 user = job_name.split()[-1]
                 BACK.add_log(user, f'{string_time_now()}: {job_name} is over\n*****\n')
-                del WORKERS[job_name]
+                del JOBS[job_name]
                 print(f'{job_name}: over')
+            if delete:
+                BACK.admin_update()
             for job_name in open_workers:
                 job = BACK.launch_job(job_name)
                 if job is None:
@@ -54,13 +52,17 @@ def main():
                     continue
                 p = Process(target=worker, args=(job, ), daemon=True)
                 p.start()
-                WORKERS[job_name] = p.pid
+                print(f'started {job_name} = {string_time_now()}: {BACK.memory_free()} mb free, {len(JOBS)} jobs')
+                JOBS[job_name] = p.pid
                 print(f'start: {job_name}')
             if not active:
                 clean_temp_dir()
+            if save_memory_counter % 300 == 0:
+                BACK.admin_logs(f'{string_time_now()}: {BACK.memory_free()} mb free, {len(JOBS)} jobs')
+                print(f'{string_time_now()}: {BACK.memory_free()} mb free, {len(JOBS)} jobs')
             if save_memory_counter % 3600 == 0:
-                log_memory_usage()
                 BACK.clean_watch_jobs()
+                BACK.admin_update()
         except Exception as ex:
             print(f'{time_now()}: {str(ex)}')
         finally:

@@ -73,6 +73,7 @@ def watch_run(job: dict):
     trigger = job['trigger']
     estimator = QAgentRun(name=agent).evaluate
     BACK.launch_watch_job(user)
+    BACK.admin_adjust_memo(user)
     time_to_sleep = time.time() + WAIT_TO_CONTINUE_WATCH
     current_game = ''
     current = None

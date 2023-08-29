@@ -117,20 +117,20 @@ class Game:
         }
 
     @staticmethod
-    def empty_count(row) -> int:
+    def empty_count(row: np.ndarray) -> int:
         return 16 - np.count_nonzero(row)
 
     @staticmethod
-    def adjacent_pair_count(row) -> int:
+    def adjacent_pair_count(row: np.ndarray) -> int:
         return 24 - np.count_nonzero(row[:, :3] - row[:, 1:]) - np.count_nonzero(row[:3, :] - row[1:, :])
 
-    def game_over(self, row) -> bool:
+    def game_over(self, row: np.ndarray) -> bool:
         if self.empty_count(self.row):
             return False
         return not self.adjacent_pair_count(row)
 
     @staticmethod
-    def _left(row, score) -> Tuple[np.ndarray, int, bool]:
+    def _left(row: np.ndarray, score: int) -> Tuple[np.ndarray, int, bool]:
         change = False
         new_row = row.copy()
         new_score = score
@@ -142,14 +142,14 @@ class Game:
                 new_row[i] = line
         return new_row, new_score, change
 
-    def pre_move(self, row, score, direction) -> Tuple[np.ndarray, int, bool]:
+    def pre_move(self, row: np.ndarray, score: int, direction: int) -> Tuple[np.ndarray, int, bool]:
         new_row = np.rot90(row, direction) if direction else row
         new_row, new_score, change = self._left(new_row, score)
         if direction:
             new_row = np.rot90(new_row, 4 - direction)
         return new_row, new_score, change
 
-    def _move_on(self, best_dir, best_row, best_score):
+    def _move_on(self, best_dir: int, best_row: np.ndarray, best_score: int):
         self.moves.append(best_dir)
         self.numMoves += 1
         self.row, self.score = best_row, best_score

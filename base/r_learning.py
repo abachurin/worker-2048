@@ -1,18 +1,19 @@
+import numpy as np
+
 from .game_logic import *
-from collections import deque
 
 
 # Argument x for feature functions is a (4, 4) numpy array of np.int32
-
 # features = all adjacent pairs
-def f_2(x):
+
+def f_2(x: np.ndarray) -> np.ndarray:
     x_vert = ((x[:3, :] << 4) + x[1:, :]).ravel()
     x_hor = ((x[:, :3] << 4) + x[:, 1:]).ravel()
     return np.concatenate([x_vert, x_hor])
 
 
 # features = all adjacent triples, i.e. 3 in a row + 3 in any square missing one corner
-def f_3(x):
+def f_3(x: np.ndarray) -> np.ndarray:
     x_vert = ((x[:2, :] << 8) + (x[1:3, :] << 4) + x[2:, :]).ravel()
     x_hor = ((x[:, :2] << 8) + (x[:, 1:3] << 4) + x[:, 2:]).ravel()
     x_ex_00 = ((x[1:, :3] << 8) + (x[1:, 1:] << 4) + x[:3, 1:]).ravel()
@@ -28,7 +29,7 @@ def f_3(x):
 # but 2) we don't want them to intersect too much (like 3 cells common to two quartets), as they start
 # to kinda suppress and contradict each other.
 # So I left just columns, rows and squares. 17 features all in all. And it works just fine.
-def f_4(x):
+def f_4(x: np.ndarray) -> np.ndarray:
     x_vert = ((x[0, :] << 12) + (x[1, :] << 8) + (x[2, :] << 4) + x[3, :]).ravel()
     x_hor = ((x[:, 0] << 12) + (x[:, 1] << 8) + (x[:, 2] << 4) + x[:, 3]).ravel()
     x_sq = ((x[:3, :3] << 12) + (x[1:, :3] << 8) + (x[:3, 1:] << 4) + x[1:, 1:]).ravel()
@@ -36,7 +37,7 @@ def f_4(x):
 
 
 # Finally, we try adding 4 "cross" 5-features for middle cells
-def f_5(x):
+def f_5(x: np.ndarray) -> np.ndarray:
     x_vert = ((x[0, :] << 12) + (x[1, :] << 8) + (x[2, :] << 4) + x[3, :]).ravel()
     x_hor = ((x[:, 0] << 12) + (x[:, 1] << 8) + (x[:, 2] << 4) + x[:, 3]).ravel()
     x_sq = ((x[:3, :3] << 12) + (x[1:, :3] << 8) + (x[:3, 1:] << 4) + x[1:, 1:]).ravel()
@@ -46,7 +47,7 @@ def f_5(x):
 
 
 # Adding some limited 6-features, up to < 2 ** (cutoff - 1) > tile
-def f_6(x):
+def f_6(x: np.ndarray) -> np.ndarray:
     x_vert = ((x[0, :] << 12) + (x[1, :] << 8) + (x[2, :] << 4) + x[3, :]).ravel()
     x_hor = ((x[:, 0] << 12) + (x[:, 1] << 8) + (x[:, 2] << 4) + x[:, 3]).ravel()
     x_sq = ((x[:3, :3] << 12) + (x[1:, :3] << 8) + (x[:3, 1:] << 4) + x[1:, 1:]).ravel()
@@ -141,9 +142,12 @@ class QAgent:
                 else:
                     self.load_weights()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f'Agent {self.name}, n={self.n}\ntrained for {self.lastTrainingEpisode} episodes, ' \
                f'top score = {self.bestScore}'
+
+    def silent_log(self, log: str):
+        BACK.add_log(self.user, log)
 
     def init_weights(self):
         if self.n == 6:
@@ -166,9 +170,6 @@ class QAgent:
         for weight_component in w:
             self.weights += weight_component.tolist()
         del w
-
-    def silent_log(self, log):
-        BACK.add_log(self.user, log)
 
     def save_agent(self, with_weights=True):
         if self.name in EXTRA_AGENTS:
@@ -249,6 +250,7 @@ class QAgent:
         BACK.save_new_alpha(job_name, self.alpha)
 
     def train_run(self, job: dict) -> str:
+        BACK.admin_adjust_memo(job['memoProjection'])
         user = job['user']
         job_name = job['description']
         global_start = start_1000 = job['start']
@@ -336,8 +338,9 @@ class QAgent:
                f'\n------------------------'
 
     def test_run(self, job: dict) -> str:
-        user = job['user']
         job_name = job['description']
+        BACK.admin_adjust_memo(job_name)
+        user = job['user']
         global_start = start = job['start']
         eps = job['episodes']
         depth = job['depth']
