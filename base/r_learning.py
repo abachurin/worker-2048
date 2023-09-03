@@ -1,3 +1,5 @@
+import threading
+
 import numpy as np
 
 from .game_logic import *
@@ -102,7 +104,7 @@ class QAgent:
         self.name = name
         self.user = user
         self.best_game_name = f'best_of_{name}'
-        self.top_game = Game(params=BACK.get_game_params(self.best_game_name))
+        self.top_game = Game(params=BACK.games.find_one({'name': self.best_game_name}))
         self.debug = debug
         if no_logs:
             self.print = no_log_function
@@ -131,10 +133,10 @@ class QAgent:
                 self.history = agent['history']
                 self.collectStep = agent['collectStep']
                 self.save_agent_keys = ('weightSignature', 'alpha', 'bestScore', 'maxTile',
-                                        'lastTrainingEpisode', 'history', 'collectStep')
+                                        'lastTrainingEpisode', 'history', 'nextDecay', 'collectStep')
                 self.num_feat, self.size_feat = PAR_SHAPE[self.n]
                 self.features = FEATURE_FUNCTIONS[self.n]
-                self.next_decay = self.lastTrainingEpisode + self.step
+                self.nextDecay = agent.get('nextDecay', self.lastTrainingEpisode + self.step)
 
                 self.weights = None
                 if not self.weightSignature:
@@ -147,7 +149,7 @@ class QAgent:
                f'top score = {self.bestScore}'
 
     def silent_log(self, log: str):
-        BACK.add_log(self.user, log)
+        BACK.add_log(self.user, log, add_time=False)
 
     def init_weights(self):
         if self.n == 6:
@@ -166,10 +168,13 @@ class QAgent:
     def load_weights(self):
         self.print('loading weights ...')
         w = BACK.s3_load(self.name)
-        self.weights = []
-        for weight_component in w:
-            self.weights += weight_component.tolist()
-        del w
+        if w is None:
+            self.init_weights()
+        else:
+            self.weights = []
+            for weight_component in w:
+                self.weights += weight_component.tolist()
+            del w
 
     def save_agent(self, with_weights=True):
         if self.name in EXTRA_AGENTS:
@@ -191,7 +196,7 @@ class QAgent:
     def save_game(self, game: Game, game_name: str):
         game.name = game_name
         game.user = game.user or self.user
-        BACK.save_game(game_name, game.to_mongo())
+        BACK.games.replace_one({'name': game_name}, game.to_mongo(), upsert=True)
 
     def _evaluate(self, row: np.ndarray, score=0) -> float:
         return sum([self.weights[i][f] for i, f in enumerate(self.features(row))])
@@ -245,12 +250,11 @@ class QAgent:
 
     def decay_alpha(self, job_name=''):
         self.alpha = round(max(self.alpha * self.decay, self.minAlpha), 6)
-        self.next_decay = self.lastTrainingEpisode + self.step
+        self.nextDecay = self.lastTrainingEpisode + self.step
         self.print(f'At episode {self.lastTrainingEpisode + 1}, LR decayed to = {round(self.alpha, 6)}')
         BACK.save_new_alpha(job_name, self.alpha)
 
     def train_run(self, job: dict) -> str:
-        BACK.admin_adjust_memo(job['memoProjection'])
         user = job['user']
         job_name = job['description']
         global_start = start_1000 = job['start']
@@ -258,7 +262,8 @@ class QAgent:
         first_episode = self.lastTrainingEpisode
         last_episode = self.lastTrainingEpisode + eps
         av1000 = []
-        ma_collect = deque(maxlen=self.collectStep)
+        ma100 = []
+        ma_collect = []
         reached = [0] * 7
         best_of_1000 = Game()
         self.print(f'--------------\n{self.name} train session started, {eps} training episodes')
@@ -272,16 +277,14 @@ class QAgent:
                 self.save_agent()
                 break
 
-            # check if it's time to decay learning rate
-            if self.lastTrainingEpisode > self.next_decay and self.alpha > self.minAlpha:
-                self.decay_alpha(job_name)
-
             game = self.episode()
             self.lastTrainingEpisode += 1
-
-            ma_collect.append(game.score)
+            ma100.append(game.score)
             av1000.append(game.score)
             max_tile = np.max(game.row)
+
+            if self.lastTrainingEpisode == self.nextDecay and self.alpha > self.minAlpha:
+                self.decay_alpha(job_name)
 
             if game.score > best_of_1000.score:
                 best_of_1000 = game
@@ -302,11 +305,14 @@ class QAgent:
                 BACK.update_timing(job_name, elapsed_time, remaining_time)
 
             if self.lastTrainingEpisode % 100 == 0:
-                ma = int(np.mean(ma_collect))
+                average = np.mean(ma100)
+                ma_collect.append(average)
                 self.print(f'episode {self.lastTrainingEpisode}: score {game.score}, reached {1 << max_tile},'
-                           f' ma_{self.collectStep} = {ma}')
+                           f' last 100 average = {int(average)}')
+                ma100 = []
                 if self.lastTrainingEpisode % self.collectStep == 0:
-                    self.history.append(ma)
+                    self.history.append(int(np.mean(ma_collect)))
+                    ma_collect = []
                     if len(self.history) == self.max_train_history:
                         self.history = self.history[1::2]
                         self.collectStep *= 2
@@ -332,24 +338,26 @@ class QAgent:
                 start_1000 = time_now()
                 self.print(f'{string_time_now()}: {self.name} weights saved')
 
-        self.print(f'Total time = {time_since(global_start)}')
+        self.print('saving weights ...')
         self.save_agent()
+        self.print(f'Total time = {time_since(global_start)}')
         return f'{string_time_now()}: {self.name} saved, {self.lastTrainingEpisode} training episodes' \
                f'\n------------------------'
 
     def test_run(self, job: dict) -> str:
         job_name = job['description']
-        BACK.admin_adjust_memo(job_name)
         user = job['user']
         global_start = start = job['start']
         eps = job['episodes']
         depth = job['depth']
         width = job['width']
         trigger = job['trigger']
+        best_trial_name = f'Last_trial_{self.user}'
         self.print(f'--------------\n{self.name} test session started, {eps} test episodes\n'
                    f'Looking forward: depth = {depth}, width = {width}, trigger = {trigger} empty cells')
 
         results = []
+        top_three = [(2, ''), (1, ''), (0, '')]
         for i in range(1, eps + 1):
             status = BACK.check_job_status(job_name)
             if status == JobStatus.KILL:
@@ -362,7 +370,15 @@ class QAgent:
             game.trial_run(estimator=self.evaluate, depth=depth, width=width, trigger=trigger)
             self.print(f'game {i}, score {game.score}, moves {game.numMoves}, achieved {get_max_tile(game.row)}, '
                        f'time = {(time.time() - now):.2f} sec')
-            results.append(game)
+            score = game.score
+            results.append((score, get_max_tile(game.row), game.numMoves))
+            if score > top_three[2][0]:
+                top_three[2] = (score, game.__str__())
+                if score > top_three[1][0]:
+                    top_three[2], top_three[1] = top_three[1], top_three[2]
+                    if score > top_three[0][0]:
+                        top_three[1], top_three[0] = top_three[0], top_three[1]
+                        self.save_game(game, best_trial_name)
 
             elapsed_time = time_now() - start
             if elapsed_time > 5:
@@ -373,23 +389,22 @@ class QAgent:
 
         if not results:
             return f'No results collected\n--------------'
-        average = np.average([v.score for v in results])
-        figures = [get_max_tile(v.row) for v in results]
-        total_odo = sum([v.numMoves for v in results])
-        results.sort(key=lambda v: v.score, reverse=True)
+        average = np.average([v[0] for v in results])
+        figures = [v[1] for v in results]
+        total_odo = sum([v[2] for v in results])
 
         def share(limit):
             return int(len([0 for v in figures if v >= limit]) / len(figures) * 10000) / 100
 
         self.print('\nBest games:\n')
-        for v in results[:3]:
-            self.print(f'{v.__str__()}\n')
+        for v in top_three:
+            if v[1]:
+                self.print(v[1])
+
         elapsed = time.time() - global_start
         self.print(f'average score of {len(results)} runs = {average}\n'
                    f'16384 reached in {share(16384)}%\n' + f'8192 reached in {share(8192)}%\n'
                    f'4096 reached in {share(4096)}%\n' + f'2048 reached in {share(2048)}%\n'
                    f'1024 reached in {share(1024)}%\n' + f'total time = {time_since(global_start)}\n'
                    f'average time per move = {round(elapsed / total_odo * 1000, 2)} ms\n')
-        best_trial_name = f'Last_trial_{self.user}'
-        self.save_game(results[0], best_trial_name)
         return f'Best game was saved as {best_trial_name}\n--------------'

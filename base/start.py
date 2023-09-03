@@ -2,7 +2,6 @@ from datetime import datetime, timedelta
 import os
 import json
 import time
-from collections import deque
 import re
 from pprint import pprint
 import boto3
@@ -32,17 +31,12 @@ class JobStatus(Enum):
     KILL = 3
 
 
-class NewGameJob(Enum):
-    KILL = 0
-    RESTART = 1
-    KEEP = 2
-
-
 TMP_DIR = os.path.join(os.getcwd(), 'tmp', '')
-WAIT_TO_CONTINUE_WATCH = 300
 SAVE_NEW_MOVES = 2
-STOPPER: Dict[str, bool] = {}
+STOPPER = {'check_memory': True}
 
+
+# Helper functions
 
 def clean_temp_dir():
     if os.path.exists(TMP_DIR):
@@ -82,6 +76,12 @@ def no_log_function(_):
     return
 
 
+def prepare_logs(log: str, add_time=True) -> List[str]:
+    if add_time:
+        log = f'{string_time_now()}: ' + log
+    return log.split('\n')
+
+
 class Backend:
 
     watch_game_pattern = {"$regex": r'^\*'}
@@ -108,7 +108,6 @@ class Backend:
         self.agents = self.db['agents']
         self.games = self.db['games']
         self.jobs = self.db['jobs']
-        self.workers = {}
 
     # Memory management
     @staticmethod
@@ -125,34 +124,8 @@ class Backend:
     def mongo_used_space(self) -> int:
         return int(self.db.command('dbstats')['totalSize']) >> 20
 
-    def update_admin(self, fields: dict):
-        self.users.update_one({'name': 'admin'}, {'$set': fields})
-
-    def admin_logs(self, log:  str):
-        admin = self.users.find_one({'name': 'admin'}, {'logs': 1})
-        if admin is not None:
-            logs = admin['logs'] + log.split('\n')
-            if len(logs) > self.admin_logs_limit + 50:
-                logs = logs[-self.admin_logs_limit:]
-            self.update_admin({'logs': logs})
-
-    def admin_update(self):
-        memo_used = self.memory_used()
-        memo_free = self.memory_free()
-        s3_used = self.s3_used_space()
-        mongo_used = self.mongo_used_space()
-        self.update_admin({'memoUsed': memo_used, 'memoFree': memo_free, 's3Used': s3_used, 'mongoUsed': mongo_used})
-
-    def admin_adjust_memo(self, job_name: str):
-        admin = self.users.find_one({'name': 'admin'}, {'memoProjected': 1})
-        job = self.jobs.find_one({'description': job_name}, {'memoProjected': 1})
-        if admin and job:
-            self.jobs.update_one({'description': job_name}, {'$set': {'memoProjected': 0}})
-            self.users.update_one({'name': 'admin'},
-                                  {'$set': {'memoProjected': admin['memoProjected'] - job['memoProjected']}})
-            self.admin_update()
-
     # S3 Storage
+
     def s3_files(self) -> List[str]:
         return [o.key for o in self.space.objects.all()]
 
@@ -180,7 +153,9 @@ class Backend:
     # MongoDB
 
     # General Job management
+
     def active_jobs(self) -> Tuple[List[str], List[str]]:
+        self.admin_adjust_memo()
         jobs = [v for v in self.jobs.find({}, {'description': 1, 'status': 1})]
         active = [v['description'] for v in jobs]
         pending = [v['description'] for v in jobs if v['status'] == JobStatus.PENDING.value]
@@ -193,17 +168,12 @@ class Backend:
         if job is None:
             return None
         if job['type'] != JobType.WATCH.value:
-            self.add_log(job['user'], f'\n{string_time_now()}: {job_name} launched')
+            self.add_log(job['user'], '\n', add_time=False)
+            self.add_log(job['user'], f'{job_name} launched')
         return job
 
     def delete_job(self, job_name: str):
-        job = self.jobs.find_one({'description': job_name}, {'memoProjected': 1})
-        if job:
-            admin = self.users.find_one({'name': 'admin'}, {'memoProjected': 1})
-            if admin:
-                self.users.update_one({'name': 'admin'},
-                                      {'$set': {'memoProjected': admin['memoProjected'] - job['memoProjected']}})
-            self.jobs.delete_one({'description': job_name})
+        self.jobs.delete_one({'description': job_name})
 
     def check_job_status(self, job_name: str) -> JobStatus:
         job = self.jobs.find_one({'description': job_name})
@@ -211,11 +181,9 @@ class Backend:
             return JobStatus.KILL
         return JobStatus(job['status'])
 
-    def add_log(self, name: str, log: str):
-        lines = log.split('\n')
-        self.users.update_one({'name': name}, {'$push': {'logs': {'$each': lines}}})
+    def add_log(self, name: str, log: str, add_time=True):
+        self.users.update_one({'name': name}, {'$push': {'logs': {'$each': prepare_logs(log, add_time)}}})
 
-    # Train/Test Agent
     def update_timing(self, job_name: str, elapsed_time: int, remaining_time: str):
         self.jobs.update_one({'description': job_name},
                              {'$set': {'timeElapsed': elapsed_time, 'remainingTimeEstimate': remaining_time}})
@@ -231,48 +199,56 @@ class Backend:
         self.s3_save(weights, name)
 
     # Watch Agent
+
     def clean_watch_jobs(self):
         self.jobs.delete_many({'type': JobType.WATCH.value})
-        self.games.delete_many({'name': self.watch_game_pattern})
+        self.games.delete_many({'user': self.watch_game_pattern})
 
     def clean_watch_games(self):
         watch_users = [v['user'] for v in self.jobs.find({'type': JobType.WATCH.value})]
         self.games.delete_many({'user': {"$nin": watch_users}})
-        all_games = [v['name'] for v in self.games.find()]
-        for name in STOPPER:
-            if name not in all_games:
-                del STOPPER[name]
 
-    def get_game_params(self, game_name: str) -> Union[None, Mapping[str, Any]]:
-        return self.games.find_one({'name': game_name})
-
-    def save_game(self, name: str, game: dict):
-        self.games.replace_one({'name': name}, game, upsert=True)
-
-    # related to Watch Agent operations
     def launch_watch_job(self, user: str):
         self.jobs.update_one({'description': user}, {'$set': {'status': JobStatus.RUN.value, 'loadingWeights': False}})
 
     def set_watch_job(self, user: str, status: bool):
         self.jobs.update_one({'description': user}, {'$set': {'loadingWeights': status}})
 
-    def get_watch_game(self, user: str) -> dict:
-        job = self.jobs.find_one({'description': user}, {'newGame': 1, 'startGame': 1})
-        if job is None:
-            self.games.delete_many({'user': user})
-            return {'status': NewGameJob.KILL}
-        if job['newGame']:
-            self.jobs.update_one({'description': user}, {'$set': {'newGame': False}})
-            return {**job['startGame'], 'user': user, 'status': NewGameJob.RESTART}
-        return {'status': NewGameJob.KEEP}
+    def update_watch_game(self, user: str, moves: list, tiles: list):
+        if moves:
+            self.games.update_one({'user': user}, {
+                '$push': {
+                    'moves': {'$each': moves},
+                    'tiles': {'$each': tiles}}
+                }
+            )
 
-    def update_watch_game(self, name: str, moves: list, tiles: list):
-        self.games.update_one({'name': name}, {
-            '$push': {
-                'moves': {'$each': moves},
-                'tiles': {'$each': tiles}}
-            }
-        )
+    # Admin functions
+
+    def update_admin(self, fields: dict):
+        self.users.update_one({'name': 'admin'}, {'$set': fields})
+
+    def admin_logs(self, log: str, add_time=True):
+        lines = prepare_logs(log, add_time)
+        print('\n'.join(lines))
+        admin = self.users.find_one({'name': 'admin'}, {'logs': 1})
+        if admin is not None:
+            logs = admin['logs'] + lines
+            if len(logs) > self.admin_logs_limit + 50:
+                logs = logs[-self.admin_logs_limit:]
+            self.update_admin({'logs': logs})
+
+    def admin_full_update(self):
+        self.update_admin({
+            'memoUsed': self.memory_used(),
+            'memoFree': self.memory_free(),
+            's3Used': self.s3_used_space(),
+            'mongoUsed': self.mongo_used_space(),
+            'numJobs': self.jobs.count_documents({})
+        })
+
+    def admin_adjust_memo(self):
+        self.update_admin({'memoFree': self.memory_free(), 'numJobs': self.jobs.count_documents({})})
 
 
 with open('base/config.json', 'r') as f:
@@ -300,3 +276,13 @@ else:
 
 
 BACK = Backend(s3_credentials, mongo_credentials)
+
+
+def get_top_memory(job):
+    top = 0
+    free_start = BACK.memory_free()
+    while not STOPPER['check_memory']:
+        used = free_start - BACK.memory_free()
+        top = max(top, used)
+        time.sleep(0.1)
+    BACK.add_log('Loki', f'top for {job} = {top}')

@@ -93,7 +93,7 @@ class Game:
             self.name = params.get('name', None)
             self.user = params.get('user', None)
             self.initial = params['initial']
-            self.row = np.array(self.initial, dtype=np.int32)
+            self.row = params.get('row', np.array(self.initial, dtype=np.int32))
             self.score = params['score']
             self.numMoves = params['numMoves']
             self.moves = params.get('moves', [])
