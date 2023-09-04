@@ -1,7 +1,3 @@
-import threading
-
-import numpy as np
-
 from .game_logic import *
 
 
@@ -283,9 +279,6 @@ class QAgent:
             av1000.append(game.score)
             max_tile = np.max(game.row)
 
-            if self.lastTrainingEpisode == self.nextDecay and self.alpha > self.minAlpha:
-                self.decay_alpha(job_name)
-
             if game.score > best_of_1000.score:
                 best_of_1000 = game
                 if game.score > self.bestScore:
@@ -307,8 +300,7 @@ class QAgent:
             if self.lastTrainingEpisode % 100 == 0:
                 average = np.mean(ma100)
                 ma_collect.append(average)
-                self.print(f'episode {self.lastTrainingEpisode}: score {game.score}, reached {1 << max_tile},'
-                           f' last 100 average = {int(average)}')
+                self.print(f'episode {self.lastTrainingEpisode}, last 100 average = {int(average)}')
                 ma100 = []
                 if self.lastTrainingEpisode % self.collectStep == 0:
                     self.history.append(int(np.mean(ma_collect)))
@@ -337,6 +329,9 @@ class QAgent:
                 best_of_1000 = Game()
                 start_1000 = time_now()
                 self.print(f'{string_time_now()}: {self.name} weights saved')
+
+            if self.lastTrainingEpisode == self.nextDecay and self.alpha > self.minAlpha:
+                self.decay_alpha(job_name)
 
         self.print('saving weights ...')
         self.save_agent()
