@@ -33,6 +33,7 @@ class JobStatus(Enum):
 
 TMP_DIR = os.path.join(os.getcwd(), 'tmp', '')
 SAVE_NEW_MOVES = 2
+MAX_LOGS = 500
 STOPPER = {'check_memory': True}
 
 
@@ -74,12 +75,6 @@ def string_time_now():
 
 def no_log_function(_):
     return
-
-
-def prepare_logs(log: str, add_time=True) -> List[str]:
-    if add_time:
-        log = f'{string_time_now()}: ' + log
-    return log.split('\n')
 
 
 class Backend:
@@ -152,6 +147,22 @@ class Backend:
 
     # MongoDB
 
+    # Logging
+
+    def add_log(self, user_name: str, log: str, add_time=True, margin_line=False):
+        old_last_log = self.users.find_one({'name': user_name}, {'lastLog': 1})
+        if old_last_log is None:
+            return
+        if add_time:
+            log = ('\n' if margin_line else '') + f'{string_time_now()}: ' + log
+        lines = log.split('\n')
+        if user_name == 'admin':
+            print(lines)
+        new_last_log = old_last_log['lastLog'] + len(lines)
+        self.users.update_one({'name': user_name},
+                              {'$set': {'lastLog': new_last_log},
+                               '$push': {'logs': {'$each': lines, '$slice': -MAX_LOGS}}})
+
     # General Job management
 
     def active_jobs(self) -> Tuple[List[str], List[str]]:
@@ -168,8 +179,7 @@ class Backend:
         if job is None:
             return None
         if job['type'] != JobType.WATCH.value:
-            self.add_log(job['user'], '\n', add_time=False)
-            self.add_log(job['user'], f'{job_name} launched')
+            self.add_log(job['user'], f'{job_name} launched', margin_line=True)
         return job
 
     def delete_job(self, job_name: str):
@@ -180,9 +190,6 @@ class Backend:
         if job is None:
             return JobStatus.KILL
         return JobStatus(job['status'])
-
-    def add_log(self, name: str, log: str, add_time=True):
-        self.users.update_one({'name': name}, {'$push': {'logs': {'$each': prepare_logs(log, add_time)}}})
 
     def update_timing(self, job_name: str, elapsed_time: int, remaining_time: str):
         self.jobs.update_one({'description': job_name},
@@ -227,16 +234,6 @@ class Backend:
 
     def update_admin(self, fields: dict):
         self.users.update_one({'name': 'admin'}, {'$set': fields})
-
-    def admin_logs(self, log: str, add_time=True):
-        lines = prepare_logs(log, add_time)
-        print('\n'.join(lines))
-        admin = self.users.find_one({'name': 'admin'}, {'logs': 1})
-        if admin is not None:
-            logs = admin['logs'] + lines
-            if len(logs) > self.admin_logs_limit + 50:
-                logs = logs[-self.admin_logs_limit:]
-            self.update_admin({'logs': logs})
 
     def admin_full_update(self):
         self.update_admin({

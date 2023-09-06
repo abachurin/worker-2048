@@ -262,8 +262,8 @@ class QAgent:
         ma_collect = []
         reached = [0] * 7
         best_of_1000 = Game()
-        self.print(f'--------------\n{self.name} train session started, {eps} training episodes')
-        self.print('Agent is saved every 1000 episodes, or on STOP command\n--------------')
+        self.print(f'--------------\n{self.name} training started, {eps} episodes\n'
+                   f'Agent is saved every 1000 episodes, or on STOP command\n--------------')
 
         while self.lastTrainingEpisode < last_episode:
             status = BACK.check_job_status(job_name)
@@ -313,22 +313,20 @@ class QAgent:
             if self.lastTrainingEpisode % 1000 == 0:
                 average = int(np.mean(av1000))
                 len_1000 = len(av1000)
-                self.print(f'\n{string_time_now()}: episode = {self.lastTrainingEpisode}')
-                self.print(f'{time_since(start_1000)} for last {len_1000} episodes')
-                self.print(f'average score = {average}')
+                log = f'\n{string_time_now()}: episode = {self.lastTrainingEpisode}\n{time_since(start_1000)} ' \
+                      f'for last {len_1000} episodes\naverage score = {average}'
                 for j in range(7):
                     r = int(sum(reached[j:]) / len_1000 * 10000) / 100
                     if r:
-                        self.print(f'{1 << (j + 10)} reached in {r} %')
-                self.print(f'best game of last 1000:')
-                self.print(best_of_1000.__str__())
-                self.print(f'best game of Agent:')
-                self.print(self.top_game.__str__())
+                        log += f'{1 << (j + 10)} reached in {r} %'
+                log += f'best game of last 1000:\n{best_of_1000.__str__()}\n' \
+                       f'best game of Agent:\n{self.top_game.__str__()}\n' \
+                       f'{string_time_now()}: {self.name} weights saved'
                 av1000 = []
                 reached = [0] * 7
                 best_of_1000 = Game()
                 start_1000 = time_now()
-                self.print(f'{string_time_now()}: {self.name} weights saved')
+                self.print(log)
 
             if self.lastTrainingEpisode == self.nextDecay and self.alpha > self.minAlpha:
                 self.decay_alpha(job_name)
@@ -363,7 +361,7 @@ class QAgent:
             now = time.time()
             game = Game()
             game.trial_run(estimator=self.evaluate, depth=depth, width=width, trigger=trigger)
-            self.print(f'game {i}, score {game.score}, moves {game.numMoves}, achieved {get_max_tile(game.row)}, '
+            self.print(f'game {i}, score {game.score}, moves {game.numMoves}, reached {get_max_tile(game.row)}, '
                        f'time = {(time.time() - now):.2f} sec')
             score = game.score
             results.append((score, get_max_tile(game.row), game.numMoves))
@@ -391,15 +389,15 @@ class QAgent:
         def share(limit):
             return int(len([0 for v in figures if v >= limit]) / len(figures) * 10000) / 100
 
-        self.print('\nBest games:\n')
+        log = '\nBest games:\n'
         for v in top_three:
             if v[1]:
-                self.print(v[1])
+                log += v[1]
 
         elapsed = time.time() - global_start
-        self.print(f'average score of {len(results)} runs = {average}\n'
-                   f'16384 reached in {share(16384)}%\n' + f'8192 reached in {share(8192)}%\n'
-                   f'4096 reached in {share(4096)}%\n' + f'2048 reached in {share(2048)}%\n'
-                   f'1024 reached in {share(1024)}%\n' + f'total time = {time_since(global_start)}\n'
-                   f'average time per move = {round(elapsed / total_odo * 1000, 2)} ms\n')
+        log = f'average score of {len(results)} runs = {average}\n16384 reached in {share(16384)}%\n' \
+              f'8192 reached in {share(8192)}%\n4096 reached in {share(4096)}%\n2048 reached in {share(2048)}%\n' \
+              f'1024 reached in {share(1024)}%\ntotal time = {time_since(global_start)}\n' \
+              f'average time per move = {round(elapsed / total_odo * 1000, 2)} ms\n'
+        self.print(log)
         return f'Best game was saved as {best_trial_name}\n--------------'
