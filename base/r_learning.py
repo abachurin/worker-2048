@@ -318,7 +318,7 @@ class QAgent:
                 for j in range(7):
                     r = int(sum(reached[j:]) / len_1000 * 10000) / 100
                     if r:
-                        log += f'{1 << (j + 10)} reached in {r} %'
+                        log += f'{1 << (j + 10)} reached in {r} %\n'
                 log += f'best game of last 1000:\n{best_of_1000.__str__()}\n' \
                        f'best game of Agent:\n{self.top_game.__str__()}\n' \
                        f'{string_time_now()}: {self.name} weights saved'
