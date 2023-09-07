@@ -262,8 +262,8 @@ class QAgent:
         ma_collect = []
         reached = [0] * 7
         best_of_1000 = Game()
-        self.print(f'--------------\n{self.name} training started, {eps} episodes\n'
-                   f'Agent is saved every 1000 episodes, or on STOP command\n--------------')
+        self.print(f'{self.name} training started, {eps} episodes\n'
+                   f'Agent is saved every 1000 episodes, or on STOP command')
 
         while self.lastTrainingEpisode < last_episode:
             status = BACK.check_job_status(job_name)
@@ -334,8 +334,7 @@ class QAgent:
         self.print('saving weights ...')
         self.save_agent()
         self.print(f'Total time = {time_since(global_start)}')
-        return f'{string_time_now()}: {self.name} saved, {self.lastTrainingEpisode} training episodes' \
-               f'\n------------------------'
+        return f'{string_time_now()}: {self.name} saved, {self.lastTrainingEpisode} training episodes'
 
     def test_run(self, job: dict) -> str:
         job_name = job['description']
@@ -346,8 +345,8 @@ class QAgent:
         width = job['width']
         trigger = job['trigger']
         best_trial_name = f'Last_trial_{self.user}'
-        self.print(f'--------------\n{self.name} test session started, {eps} test episodes\n'
-                   f'Looking forward: depth = {depth}, width = {width}, trigger = {trigger} empty cells')
+        self.print(f'{self.name} test session started, {eps} test episodes\n'
+                   f'Looking forward: depth = {depth}, width = {width}, trigger = {trigger} empty cells\n')
 
         results = []
         top_three = [(2, ''), (1, ''), (0, '')]
@@ -381,7 +380,7 @@ class QAgent:
                 start = time_now()
 
         if not results:
-            return f'No results collected\n--------------'
+            return f'No results collected'
         average = np.average([v[0] for v in results])
         figures = [v[1] for v in results]
         total_odo = sum([v[2] for v in results])
@@ -395,7 +394,7 @@ class QAgent:
                 log += v[1]
 
         elapsed = time.time() - global_start
-        log = f'average score of {len(results)} runs = {average}\n16384 reached in {share(16384)}%\n' \
+        log = f'\naverage score of {len(results)} runs = {average}\n16384 reached in {share(16384)}%\n' \
               f'8192 reached in {share(8192)}%\n4096 reached in {share(4096)}%\n2048 reached in {share(2048)}%\n' \
               f'1024 reached in {share(1024)}%\ntotal time = {time_since(global_start)}\n' \
               f'average time per move = {round(elapsed / total_odo * 1000, 2)} ms\n'
