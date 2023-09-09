@@ -314,7 +314,7 @@ class QAgent:
                 average = int(np.mean(av1000))
                 len_1000 = len(av1000)
                 log = f'\n{string_time_now()}: episode = {self.lastTrainingEpisode}\n{time_since(start_1000)} ' \
-                      f'for last {len_1000} episodes\naverage score = {average}'
+                      f'for last {len_1000} episodes\naverage score = {average}\n'
                 for j in range(7):
                     r = int(sum(reached[j:]) / len_1000 * 10000) / 100
                     if r:
