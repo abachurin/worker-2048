@@ -388,15 +388,16 @@ class QAgent:
         def share(limit):
             return int(len([0 for v in figures if v >= limit]) / len(figures) * 10000) / 100
 
-        log = '\nBest games:\n'
+        log = '\nBest games:\n\n'
+        pprint(top_three)
         for v in top_three:
             if v[1]:
-                log += v[1]
+                log += v[1] + '\n'
 
         elapsed = time.time() - global_start
-        log = f'\naverage score of {len(results)} runs = {average}\n16384 reached in {share(16384)}%\n' \
-              f'8192 reached in {share(8192)}%\n4096 reached in {share(4096)}%\n2048 reached in {share(2048)}%\n' \
-              f'1024 reached in {share(1024)}%\ntotal time = {time_since(global_start)}\n' \
-              f'average time per move = {round(elapsed / total_odo * 1000, 2)} ms\n'
+        log += f'\naverage score of {len(results)} runs = {average}\n16384 reached in {share(16384)}%\n' \
+               f'8192 reached in {share(8192)}%\n4096 reached in {share(4096)}%\n2048 reached in {share(2048)}%\n' \
+               f'1024 reached in {share(1024)}%\ntotal time = {time_since(global_start)}\n' \
+               f'average time per move = {round(elapsed / total_odo * 1000, 2)} ms\n'
         self.print(log)
         return f'Best game was saved as {best_trial_name}\n--------------'
