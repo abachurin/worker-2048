@@ -7,7 +7,6 @@ class QAgentRun:
         self.name = name
         self.weights = None
         self.features = None
-
         self.print = no_log_function if no_logs else print
         match self.name:
             case 'Random Moves':

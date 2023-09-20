@@ -35,7 +35,6 @@ def main():
     clean_temp_dir()
     BACK.clean_watch_jobs()
     BACK.admin_full_update(len(JOBS))
-    save_memory_counter = 1
     current_jobs = 0
     error = False
     while True:
@@ -70,10 +69,9 @@ def main():
         finally:
             time.sleep(3)
             if len(JOBS) != current_jobs:
-                BACK.clean_watch_jobs()
+                BACK.clean_watch_games()
                 BACK.admin_full_update(len(JOBS))
                 current_jobs = len(JOBS)
-            save_memory_counter += 1
 
 
 if __name__ == '__main__':
