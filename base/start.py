@@ -235,7 +235,7 @@ class Backend:
     def update_admin(self, fields: dict):
         self.users.update_one({'name': 'admin'}, {'$set': fields})
 
-    def admin_full_update(self):
+    def admin_full_update(self, num_jobs: int):
         self.update_admin({
             'memoUsed': self.memory_used(),
             'memoFree': self.memory_free(),
@@ -243,6 +243,8 @@ class Backend:
             'mongoUsed': self.mongo_used_space(),
             'numJobs': self.jobs.count_documents({})
         })
+        BACK.add_log('admin', f'{num_jobs} jobs, {BACK.memory_used()} used, {BACK.memory_free()} free, '
+                              f'{BACK.s3_used_space()} s3, {BACK.mongo_used_space()} mongo')
 
     def admin_adjust_memo(self):
         self.update_admin({'memoFree': self.memory_free(), 'numJobs': self.jobs.count_documents({})})
@@ -282,4 +284,4 @@ def get_top_memory(job):
         used = free_start - BACK.memory_free()
         top = max(top, used)
         time.sleep(0.1)
-    BACK.add_log('Loki', f'top for {job} = {top}')
+    BACK.add_log('admin', f'top memory for {job} = {top}')

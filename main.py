@@ -34,8 +34,9 @@ def worker(job: dict):
 def main():
     clean_temp_dir()
     BACK.clean_watch_jobs()
-    BACK.admin_full_update()
+    BACK.admin_full_update(len(JOBS))
     save_memory_counter = 1
+    current_jobs = 0
     error = False
     while True:
         try:
@@ -56,13 +57,9 @@ def main():
                 p = Process(target=worker, args=(job, ), daemon=True)
                 p.start()
                 JOBS[job_name] = p.pid
-                BACK.add_log('admin', f'start {job_name}, {BACK.memory_free()} mb free, {len(JOBS)} current')
+                BACK.add_log('admin', f'{job_name}')
             if not active:
                 clean_temp_dir()
-            if save_memory_counter % 1200 == 0:
-                BACK.clean_watch_jobs()
-                BACK.admin_full_update()
-                BACK.add_log('admin', f'{BACK.memory_free()} free, {len(JOBS)} current')
             if error:
                 BACK.add_log('admin', 'Worker back online')
                 error = False
@@ -72,6 +69,10 @@ def main():
             error = True
         finally:
             time.sleep(3)
+            if len(JOBS) != current_jobs:
+                BACK.clean_watch_jobs()
+                BACK.admin_full_update(len(JOBS))
+                current_jobs = len(JOBS)
             save_memory_counter += 1
 
 
