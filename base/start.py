@@ -213,7 +213,7 @@ class Backend:
 
     def clean_watch_games(self):
         watch_users = [v['user'] for v in self.jobs.find({'type': JobType.WATCH.value})]
-        self.games.delete_many({'user': {"$nin": watch_users}})
+        self.games.delete_many({'$and': [{'user': {'$nin': watch_users}}, {'user': self.watch_game_pattern}]})
 
     def launch_watch_job(self, user: str):
         self.jobs.update_one({'description': user}, {'$set': {'status': JobStatus.RUN.value, 'loadingWeights': False}})
