@@ -381,12 +381,12 @@ class QAgent:
 
         if not results:
             return f'No results collected'
-        average = np.average([v[0] for v in results])
+        average = int(np.average([v[0] for v in results]))
         figures = [v[1] for v in results]
         total_odo = sum([v[2] for v in results])
 
         def share(limit):
-            return int(len([0 for v in figures if v >= limit]) / len(figures) * 10000) / 100
+            return f'{len([0 for v in figures if v >= limit]) / len(figures):.2f}'
 
         log = '\nBest games:\n\n'
         pprint(top_three)

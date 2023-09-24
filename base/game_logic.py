@@ -161,7 +161,7 @@ class Game:
         if depth == 0:
             return estimator(row, score)
         empty = self.empty_count(row)
-        if empty >= trigger:
+        if empty > trigger:
             return estimator(row, score)
         num_tiles = min(width, empty)
         empty_i, empty_j = self.empty(row)
